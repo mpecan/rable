@@ -59,6 +59,21 @@ pub fn parse_word_segments(value: &str) -> Vec<WordSegment> {
             continue;
         }
 
+        // Single quotes are opaque — nothing is special inside '...'
+        if chars[i] == '\'' && !prev_backslash && !in_double_quote {
+            literal.push(chars[i]);
+            i += 1;
+            while i < chars.len() && chars[i] != '\'' {
+                literal.push(chars[i]);
+                i += 1;
+            }
+            if i < chars.len() {
+                literal.push(chars[i]); // closing '
+                i += 1;
+            }
+            continue;
+        }
+
         // Backticks are opaque — don't process $'...' or $() inside them
         if chars[i] == '`' && !prev_backslash {
             literal.push(chars[i]);
