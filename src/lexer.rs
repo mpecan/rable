@@ -594,6 +594,38 @@ impl Lexer {
         }
     }
 
+    /// Reads contents of an ANSI-C quoted string `$'...'` (after the opening `'`).
+    /// Unlike regular single quotes, `\` is an escape character here.
+    fn read_ansi_c_quoted(&mut self, value: &mut String) -> Result<()> {
+        loop {
+            match self.peek_char() {
+                Some('\'') => {
+                    self.advance_char();
+                    value.push('\'');
+                    return Ok(());
+                }
+                Some('\\') => {
+                    self.advance_char();
+                    value.push('\\');
+                    if let Some(next) = self.advance_char() {
+                        value.push(next);
+                    }
+                }
+                Some(c) => {
+                    self.advance_char();
+                    value.push(c);
+                }
+                None => {
+                    return Err(RableError::matched_pair(
+                        "unterminated ANSI-C quote",
+                        self.pos,
+                        self.line,
+                    ));
+                }
+            }
+        }
+    }
+
     /// Reads contents of a double-quoted string (after the opening `"`).
     fn read_double_quoted(&mut self, value: &mut String) -> Result<()> {
         loop {
@@ -710,10 +742,10 @@ impl Lexer {
                 self.read_param_expansion_braces(value)?;
             }
             Some('\'') => {
-                // $'...' ANSI-C quoting
+                // $'...' ANSI-C quoting — handles \ escapes unlike regular ''
                 self.advance_char();
                 value.push('\'');
-                self.read_single_quoted(value)?;
+                self.read_ansi_c_quoted(value)?;
             }
             Some('"') => {
                 // $"..." locale string

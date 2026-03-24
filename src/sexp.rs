@@ -381,13 +381,25 @@ fn process_ansi_c_content(chars: &[char], pos: &mut usize) -> String {
                 't' => out.push('\t'),
                 'r' => out.push('\r'),
                 'a' => out.push('\x07'),
-                'b' => {
-                    out.pop(); // backspace removes previous char
-                }
+                'b' => out.push('\x08'),
                 'f' => out.push('\x0C'),
                 'v' => out.push('\x0B'),
                 'e' | 'E' => out.push('\x1B'),
                 '\\' => out.push('\\'),
+                'c' => {
+                    // Control character: \cX → chr(X & 0x1F)
+                    if *pos < chars.len() {
+                        let ctrl = chars[*pos];
+                        *pos += 1;
+                        let val = (ctrl as u32) & 0x1F;
+                        if val > 0
+                            && let Some(ch) = char::from_u32(val)
+                        {
+                            out.push(ch);
+                        }
+                        // \c@ or val==0 → NUL, which is dropped
+                    }
+                }
                 '\'' => {
                     // Escaped single quote: output as '\\''
                     out.push('\'');
@@ -398,9 +410,11 @@ fn process_ansi_c_content(chars: &[char], pos: &mut usize) -> String {
                 }
                 '"' => out.push('"'),
                 'x' => {
-                    // Hex escape: \xNN
+                    // Hex escape: \xNN — NUL is dropped
                     let hex = read_hex(chars, pos, 2);
-                    if let Some(ch) = char::from_u32(hex) {
+                    if hex > 0
+                        && let Some(ch) = char::from_u32(hex)
+                    {
                         out.push(ch);
                     }
                 }
@@ -419,7 +433,7 @@ fn process_ansi_c_content(chars: &[char], pos: &mut usize) -> String {
                     }
                 }
                 '0'..='7' => {
-                    // Octal escape
+                    // Octal escape — NUL is dropped
                     let mut val = u32::from(esc as u8 - b'0');
                     for _ in 0..2 {
                         if *pos < chars.len() && chars[*pos] >= '0' && chars[*pos] <= '7' {
@@ -427,7 +441,9 @@ fn process_ansi_c_content(chars: &[char], pos: &mut usize) -> String {
                             *pos += 1;
                         }
                     }
-                    if let Some(ch) = char::from_u32(val) {
+                    if val > 0
+                        && let Some(ch) = char::from_u32(val)
+                    {
                         out.push(ch);
                     }
                 }
@@ -670,13 +686,13 @@ fn write_redirect(f: &mut fmt::Formatter<'_>, op: &str, target: &Node, _fd: i32)
             op.starts_with(">&") || op.starts_with("<&") || op.ends_with("&-") || op.ends_with('&');
         if is_fd_op && value.chars().all(|c| c.is_ascii_digit() || c == '-') {
             write!(f, "{value})")
+        } else if value.starts_with("$'") || value.starts_with("$\"") {
+            // Process ANSI-C and locale strings in redirect targets
+            write!(f, "\"")?;
+            write_word_value(f, value)?;
+            write!(f, "\")")
         } else {
-            // Strip $" prefix from locale strings
-            let val = value
-                .strip_prefix('$')
-                .filter(|rest| rest.starts_with('"'))
-                .unwrap_or(value);
-            write!(f, "\"{val}\")")
+            write!(f, "\"{value}\")")
         }
     } else {
         write!(f, "{target})")
