@@ -35,15 +35,77 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-targets
 
+  python:
+    name: Python Bindings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.0"
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install maturin and build
+        run: |
+          python -m pip install --upgrade pip maturin
+          maturin develop
+      - name: Test Python bindings
+        run: |
+          python -c "
+          from rable import parse, ParseError, MatchedPairError
+          # Basic parsing
+          nodes = parse('echo hello')
+          assert nodes[0].to_sexp() == '(command (word \"echo\") (word \"hello\"))'
+          # Error handling
+          try:
+              parse('if')
+              assert False, 'Should have raised ParseError'
+          except ParseError:
+              pass
+          # Extglob
+          nodes = parse('echo @(a|b)', extglob=True)
+          assert len(nodes) == 1
+          print('Python binding tests passed')
+          "
+      - name: Install Parable and run compatibility test
+        run: |
+          pip install git+https://github.com/ldayton/Parable.git
+          python -c "
+          import sys; import rable as p; sys.modules['parable'] = p
+          exec(open('tests/run_tests.py').read())
+          " -- tests/parable/
+
+  benchmark:
+    name: Benchmark
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93.0"
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Setup and benchmark
+        run: |
+          python -m pip install --upgrade pip maturin
+          maturin develop --release
+          pip install git+https://github.com/ldayton/Parable.git
+          python tests/benchmark.py
+
   check:
     name: CI Status
     if: always()
-    needs: [lint, test]
+    needs: [lint, test, python]
     runs-on: ubuntu-latest
     steps:
       - name: Validate CI results
         run: |
-          if [[ "${{ needs.lint.result }}" != "success" || "${{ needs.test.result }}" != "success" ]]; then
+          if [[ "${{ needs.lint.result }}" != "success" || "${{ needs.test.result }}" != "success" || "${{ needs.python.result }}" != "success" ]]; then
             echo "CI failed"
             exit 1
           fi

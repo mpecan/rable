@@ -7,7 +7,7 @@ repository = "https://github.com/mpecan/rable"
 description = "A Rust implementation of the Parable bash parser — complete GNU Bash 5.3-compatible parsing with Python bindings"
 keywords = ["bash", "parser", "shell", "ast", "pyo3"]
 categories = ["parsing", "command-line-utilities", "development-tools"]
-readme = false
+readme = "README.md"
 rust-version = "1.93"
 
 [dependencies]
