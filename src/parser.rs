@@ -186,16 +186,22 @@ impl Parser {
 
     /// Parses a pipeline (commands separated by `|`).
     fn parse_pipeline(&mut self) -> Result<Node> {
-        // Check for `!` negation
+        // Check for `!` negation — can nest with time
         if self.lexer.peek_token()?.kind == TokenType::Bang {
             self.lexer.next_token()?;
-            let pipeline = self.parse_pipeline_inner()?;
+            // ! ! cmd → double negation cancels out
+            if self.lexer.peek_token()?.kind == TokenType::Bang {
+                self.lexer.next_token()?;
+                return self.parse_pipeline_inner();
+            }
+            // ! time ... or just ! pipeline
+            let inner = self.parse_pipeline()?;
             return Ok(Node::Negation {
-                pipeline: Box::new(pipeline),
+                pipeline: Box::new(inner),
             });
         }
 
-        // Check for `time`
+        // Check for `time` — can nest with !
         if self.lexer.peek_token()?.kind == TokenType::Time {
             self.lexer.next_token()?;
             let posix = if self.check_word("-p")? {
@@ -204,9 +210,20 @@ impl Parser {
             } else {
                 false
             };
-            let pipeline = self.parse_pipeline_inner()?;
+            // time ! cmd → (negation (time (cmd))) — negation wraps time
+            if self.lexer.peek_token()?.kind == TokenType::Bang {
+                self.lexer.next_token()?;
+                let p = self.parse_pipeline_inner()?;
+                return Ok(Node::Negation {
+                    pipeline: Box::new(Node::Time {
+                        pipeline: Box::new(p),
+                        posix,
+                    }),
+                });
+            }
+            let inner = self.parse_pipeline_inner()?;
             return Ok(Node::Time {
-                pipeline: Box::new(pipeline),
+                pipeline: Box::new(inner),
                 posix,
             });
         }

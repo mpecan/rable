@@ -263,6 +263,13 @@ fn write_word_value(f: &mut fmt::Formatter<'_>, value: &str) -> fmt::Result {
                 i += 1;
             }
         } else if i + 1 < chars.len() && chars[i] == '$' && chars[i + 1] == '(' {
+            // Check for $(( )) arithmetic — don't reformat
+            if i + 2 < chars.len() && chars[i + 2] == '(' {
+                // Arithmetic expansion: $((...)) — output raw
+                write_escaped_char(f, chars[i])?;
+                i += 1;
+                continue;
+            }
             // Command substitution — try reformatting
             write!(f, "$(")?;
             i += 2;
