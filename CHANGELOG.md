@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/mpecan/rable/compare/rable-v0.1.3...rable-v0.1.4) (2026-03-24)
+
+
+### Bug Fixes
+
+* include README.md as PyPI package description ([5c8cdc2](https://github.com/mpecan/rable/commit/5c8cdc214037d103eb99492c5bb4fa65c9210717))
+
 ## [0.1.3](https://github.com/mpecan/rable/compare/rable-v0.1.2...rable-v0.1.3) (2026-03-24)
 
 
