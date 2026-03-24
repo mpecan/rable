@@ -778,7 +778,7 @@ fn write_redirect(f: &mut fmt::Formatter<'_>, op: &str, target: &Node, _fd: i32)
         // For fd operations (>&, <&, >&-, <&-), output bare number
         let is_fd_op =
             op.starts_with(">&") || op.starts_with("<&") || op.ends_with("&-") || op.ends_with('&');
-        if is_fd_op && value.chars().all(|c| c.is_ascii_digit() || c == '-') {
+        if is_fd_op && !value.is_empty() && value.chars().all(|c| c.is_ascii_digit()) {
             write!(f, "{value})")
         } else if value.starts_with("$\"") {
             // Locale string in redirect: strip $ prefix, preserve literal quotes

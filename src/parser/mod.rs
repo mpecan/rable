@@ -366,7 +366,7 @@ impl Parser {
         let is_time = tok.kind == TokenType::Time;
         let result = if is_time {
             // After |, time is a regular word, not a keyword.
-            // Temporarily demote it to a Word token.
+            // Temporarily demote it and all following reserved words to words.
             let time_tok = self.lexer.next_token()?;
             let mut words = vec![word_node(&time_tok.value)];
             // Check for -p flag (also a word in this context)
@@ -374,21 +374,35 @@ impl Parser {
                 let p_tok = self.lexer.next_token()?;
                 words.push(word_node(&p_tok.value));
             }
-            // Parse remaining as simple command, prepending our words
-            let inner = self.parse_simple_command()?;
-            if let Node::Command {
-                words: mut w,
-                redirects,
-            } = inner
-            {
-                words.append(&mut w);
-                Ok(Node::Command { words, redirects })
-            } else {
-                Ok(Node::Command {
-                    words,
-                    redirects: Vec::new(),
-                })
+            // Consume all remaining words (including reserved words as plain words)
+            let mut redirects = Vec::new();
+            loop {
+                if self.at_end()? {
+                    break;
+                }
+                let t = self.lexer.peek_token()?;
+                if matches!(
+                    t.kind,
+                    TokenType::Pipe
+                        | TokenType::PipeBoth
+                        | TokenType::Semi
+                        | TokenType::Newline
+                        | TokenType::Ampersand
+                        | TokenType::And
+                        | TokenType::Or
+                        | TokenType::Eof
+                        | TokenType::RightParen
+                ) {
+                    break;
+                }
+                if self.is_redirect_operator()? {
+                    redirects.push(self.parse_redirect()?);
+                    continue;
+                }
+                let t = self.lexer.next_token()?;
+                words.push(word_node(&t.value));
             }
+            Ok(Node::Command { words, redirects })
         } else {
             self.parse_command_inner()
         };
