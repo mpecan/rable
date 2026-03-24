@@ -138,6 +138,7 @@ pub fn parse_word_segments(value: &str) -> Vec<WordSegment> {
             }
         } else if (chars[i] == '>' || chars[i] == '<')
             && !prev_backslash
+            && !in_double_quote
             && i + 1 < chars.len()
             && chars[i + 1] == '('
         {

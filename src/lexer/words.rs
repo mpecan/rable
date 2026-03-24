@@ -226,7 +226,15 @@ impl Lexer {
     fn continue_word(&mut self, value: &mut String) -> Result<()> {
         while let Some(c) = self.peek_char() {
             match c {
-                ' ' | '\t' | '\n' | '|' | '&' | ';' | ')' | '<' | '>' | '(' => break,
+                ' ' | '\t' | '\n' | '|' | '&' | ';' | ')' | '(' => break,
+                // < and > break UNLESS followed by ( (process substitution continues word)
+                '<' | '>' => {
+                    if self.input.get(self.pos + 1) == Some(&'(') {
+                        self.read_process_sub_into(value)?;
+                    } else {
+                        break;
+                    }
+                }
                 '\'' | '"' | '\\' | '$' | '`' => {
                     self.read_word_special(value, c)?;
                 }
