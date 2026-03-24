@@ -1,7 +1,9 @@
+pub(crate) mod ansi_c;
+pub(crate) mod word;
+
 use std::fmt;
 
 use crate::ast::{CasePattern, Node};
-use crate::format;
 
 /// Dispatch formatting to type-specific helpers, keeping the match arms short.
 #[allow(clippy::too_many_lines, clippy::match_same_arms)]
@@ -10,7 +12,7 @@ impl fmt::Display for Node {
         match self {
             Self::Word { value, .. } => {
                 write!(f, "(word \"")?;
-                write_word_value(f, value)?;
+                word::write_word_value(f, value)?;
                 write!(f, "\")")
             }
             Self::Command { words, redirects } => write_spaced(f, "(command", words, redirects),
@@ -241,63 +243,10 @@ impl fmt::Display for CasePattern {
 
 // --- helpers ---
 
-/// Writes a word value with proper escaping/formatting per segment type.
-/// `$(...)` content is reformatted and written with literal newlines.
-/// ANSI-C and locale prefixes are processed. Regular text is escaped.
-fn write_word_value(f: &mut fmt::Formatter<'_>, value: &str) -> fmt::Result {
-    let mut i = 0;
-    let chars: Vec<char> = value.chars().collect();
-
-    while i < chars.len() {
-        // Don't trigger $-processing if $ is escaped
-        let prev_backslash = i > 0 && chars[i - 1] == '\\';
-        if i + 1 < chars.len() && chars[i] == '$' && chars[i + 1] == '\'' && !prev_backslash {
-            // ANSI-C quoting
-            i += 2;
-            let processed = process_ansi_c_content(&chars, &mut i);
-            write_escaped_word(f, "'")?;
-            write_escaped_word(f, &processed)?;
-            write_escaped_word(f, "'")?;
-        } else if i + 1 < chars.len() && chars[i] == '$' && chars[i + 1] == '"' && !prev_backslash {
-            // Locale string — strip $
-            i += 1;
-            while i < chars.len() {
-                write_escaped_char(f, chars[i])?;
-                if chars[i] == '"' && i > 0 {
-                    i += 1;
-                    break;
-                }
-                i += 1;
-            }
-        } else if i + 1 < chars.len() && chars[i] == '$' && chars[i + 1] == '(' && !prev_backslash {
-            // Check for $(( )) arithmetic — don't reformat
-            if i + 2 < chars.len() && chars[i + 2] == '(' {
-                // Arithmetic expansion: $((...)) — output raw
-                write_escaped_char(f, chars[i])?;
-                i += 1;
-                continue;
-            }
-            // Command substitution — try reformatting
-            write!(f, "$(")?;
-            i += 2;
-            let content = extract_paren_content(&chars, &mut i);
-            if let Some(reformatted) = format::reformat_bash(&content) {
-                write_escaped_word(f, &reformatted)?;
-            } else {
-                let normalized = normalize_cmdsub_content(&content);
-                write_escaped_word(f, &normalized)?;
-            }
-            write!(f, ")")?;
-        } else {
-            write_escaped_char(f, chars[i])?;
-            i += 1;
-        }
-    }
-    Ok(())
-}
+// Old write_word_value replaced by word::write_word_value (segment-based)
 
 /// Extracts content from matched parentheses (for command substitution).
-fn extract_paren_content(chars: &[char], pos: &mut usize) -> String {
+pub(super) fn extract_paren_content(chars: &[char], pos: &mut usize) -> String {
     let mut content = String::new();
     let mut depth = 1;
     while *pos < chars.len() {
@@ -349,7 +298,7 @@ fn extract_paren_content(chars: &[char], pos: &mut usize) -> String {
 /// - Strips leading/trailing whitespace and newlines
 /// - Strips trailing semicolons
 /// - Adds space after `<` for file reading shortcuts
-fn normalize_cmdsub_content(content: &str) -> String {
+pub(super) fn normalize_cmdsub_content(content: &str) -> String {
     let trimmed = content.trim();
     let stripped = trimmed.strip_suffix(';').unwrap_or(trimmed).trim_end();
     // Normalize $(<file) to $(< file)
@@ -366,7 +315,7 @@ fn normalize_cmdsub_content(content: &str) -> String {
 /// Returns the processed content (without surrounding quotes).
 /// Advances `pos` past the closing `'`.
 #[allow(clippy::too_many_lines)]
-fn process_ansi_c_content(chars: &[char], pos: &mut usize) -> String {
+pub(super) fn process_ansi_c_content(chars: &[char], pos: &mut usize) -> String {
     let mut out = String::new();
     while *pos < chars.len() {
         let c = chars[*pos];
@@ -495,7 +444,7 @@ fn operator_name(op: &str) -> &str {
 }
 
 /// Writes a single character with S-expression escaping.
-fn write_escaped_char(f: &mut fmt::Formatter<'_>, ch: char) -> fmt::Result {
+pub(super) fn write_escaped_char(f: &mut fmt::Formatter<'_>, ch: char) -> fmt::Result {
     match ch {
         '"' => write!(f, "\\\""),
         '\\' => write!(f, "\\\\"),
@@ -506,7 +455,7 @@ fn write_escaped_char(f: &mut fmt::Formatter<'_>, ch: char) -> fmt::Result {
 }
 
 /// Writes a word value with proper escaping for S-expression output.
-fn write_escaped_word(f: &mut fmt::Formatter<'_>, value: &str) -> fmt::Result {
+pub(super) fn write_escaped_word(f: &mut fmt::Formatter<'_>, value: &str) -> fmt::Result {
     for ch in value.chars() {
         match ch {
             '"' => write!(f, "\\\"")?,
