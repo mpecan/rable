@@ -41,25 +41,12 @@ pub fn reformat_bash(source: &str) -> Option<String> {
     }
     let _guard = DepthGuard::enter()?;
 
-    let needs_reformat = source.contains("if ")
-        || source.contains("while ")
-        || source.contains("until ")
-        || source.contains("for ")
-        || source.contains("case ")
-        || source.contains("function ")
-        || source.contains("() ")
-        || source.contains('|')
-        || source.contains("<<")
-        || source.contains(">&")
-        || source.contains("<&")
-        || source.contains("$\"")
-        || source.contains("[[")
-        || source.contains("! ")
-        || source.contains('>')
-        || source.contains('<')
-        || source.contains("$'")
-        || has_leading_paren(source);
-    if !needs_reformat {
+    // Always try to reformat if the content has any operators or special syntax.
+    // The DepthGuard prevents recursion, and the 1000-char limit handles performance.
+    let dominated_by_words = source
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == ' ' || c == '_' || c == '-' || c == '.' || c == '/');
+    if dominated_by_words {
         return None;
     }
 
@@ -74,7 +61,9 @@ pub fn reformat_bash(source: &str) -> Option<String> {
         }
         format_node(node, &mut out, 0);
     }
-    Some(out)
+    // Trim trailing spaces/tabs but NOT newlines (heredocs need those)
+    let trimmed = out.trim_end_matches([' ', '\t']);
+    Some(trimmed.to_string())
 }
 
 /// Formats a single AST node into canonical bash source.
@@ -537,11 +526,6 @@ fn indent_str(out: &mut String, n: usize) {
     for _ in 0..n {
         out.push(' ');
     }
-}
-
-/// Check if source starts with `(` (subshell/grouping).
-fn has_leading_paren(source: &str) -> bool {
-    source.trim_start().starts_with('(')
 }
 
 /// Process a word value for canonical output:
