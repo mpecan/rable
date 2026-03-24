@@ -1,0 +1,147 @@
+//! Conditional expression parser for `[[ ... ]]`.
+
+use crate::ast::Node;
+use crate::error::{RableError, Result};
+use crate::token::{Token, TokenType};
+
+use super::{
+    Parser,
+    helpers::{cond_term, is_cond_binary_op},
+};
+
+impl Parser {
+    pub(super) fn parse_cond_command(&mut self) -> Result<Node> {
+        self.expect(TokenType::DoubleLeftBracket)?;
+        self.lexer.state.cond_expr = true;
+
+        let body = self.parse_cond_or()?;
+
+        self.lexer.state.cond_expr = false;
+        self.expect_cond_close()?;
+        let redirects = self.parse_trailing_redirects()?;
+
+        Ok(Node::ConditionalExpr {
+            body: Box::new(body),
+            redirects,
+        })
+    }
+
+    fn parse_cond_or(&mut self) -> Result<Node> {
+        let mut left = self.parse_cond_and()?;
+        while !self.is_cond_close()? && self.peek_is(TokenType::Or)? {
+            self.lexer.next_token()?;
+            let right = self.parse_cond_and()?;
+            left = Node::CondOr {
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_cond_and(&mut self) -> Result<Node> {
+        let mut left = self.parse_cond_primary()?;
+        while !self.is_cond_close()? && self.peek_is(TokenType::And)? {
+            self.lexer.next_token()?;
+            let right = self.parse_cond_primary()?;
+            left = Node::CondAnd {
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_cond_primary(&mut self) -> Result<Node> {
+        let tok = self.lexer.peek_token()?;
+
+        // Handle ! (negation) — Parable drops the negation
+        if tok.kind == TokenType::Bang {
+            self.lexer.next_token()?;
+            return self.parse_cond_primary();
+        }
+
+        // Handle ( grouped expression )
+        if tok.kind == TokenType::LeftParen {
+            self.lexer.next_token()?;
+            let inner = self.parse_cond_or()?;
+            self.expect(TokenType::RightParen)?;
+            return Ok(Node::CondParen {
+                inner: Box::new(inner),
+            });
+        }
+
+        let first = self.lexer.next_token()?;
+
+        // Check for unary operators: -f, -d, -z, -n, etc.
+        if first.value.starts_with('-')
+            && first.value.len() <= 3
+            && self.peek_cond_term()?.is_some()
+        {
+            let operand_tok = self.lexer.next_token()?;
+            return Ok(Node::UnaryTest {
+                op: first.value,
+                operand: Box::new(cond_term(&operand_tok.value)),
+            });
+        }
+
+        // Check for binary operators
+        if !self.is_cond_close()?
+            && !self.peek_is(TokenType::And)?
+            && !self.peek_is(TokenType::Or)?
+        {
+            let op_tok = self.lexer.peek_token()?;
+            let is_binary = is_cond_binary_op(&op_tok.value)
+                || op_tok.kind == TokenType::Less
+                || op_tok.kind == TokenType::Greater;
+            if is_binary {
+                let op = self.lexer.next_token()?;
+                let right = self.lexer.next_token()?;
+                return Ok(Node::BinaryTest {
+                    op: op.value,
+                    left: Box::new(cond_term(&first.value)),
+                    right: Box::new(cond_term(&right.value)),
+                });
+            }
+        }
+
+        // Bare word: implicit -n test
+        Ok(Node::UnaryTest {
+            op: "-n".to_string(),
+            operand: Box::new(cond_term(&first.value)),
+        })
+    }
+
+    fn expect_cond_close(&mut self) -> Result<Token> {
+        let tok = self.lexer.next_token()?;
+        if tok.kind == TokenType::DoubleRightBracket
+            || (tok.kind == TokenType::Word && tok.value == "]]")
+        {
+            Ok(tok)
+        } else {
+            Err(RableError::parse(
+                format!("expected ]], got {:?}", tok.value),
+                tok.pos,
+                tok.line,
+            ))
+        }
+    }
+
+    fn is_cond_close(&mut self) -> Result<bool> {
+        let tok = self.lexer.peek_token()?;
+        Ok(tok.kind == TokenType::DoubleRightBracket
+            || (tok.kind == TokenType::Word && tok.value == "]]"))
+    }
+
+    fn peek_cond_term(&mut self) -> Result<Option<()>> {
+        if self.is_cond_close()? {
+            return Ok(None);
+        }
+        let tok = self.lexer.peek_token()?;
+        if matches!(tok.kind, TokenType::And | TokenType::Or) {
+            Ok(None)
+        } else {
+            Ok(Some(()))
+        }
+    }
+}
