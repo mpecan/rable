@@ -71,6 +71,30 @@ _install-parable: _ensure-venv
 _ensure-venv:
     @test -d .venv || (echo "Run 'just venv' first" && exit 1)
 
+# --- Fuzzing ---
+
+# Differential fuzzer: mutate existing test inputs (default 10k iterations)
+fuzz-mutate n="10000": develop _install-parable
+    .venv/bin/python3 tests/fuzz.py mutate -n {{n}}
+
+# Differential fuzzer: generate random bash fragments
+fuzz-generate n="5000": develop _install-parable
+    .venv/bin/python3 tests/fuzz.py generate -n {{n}}
+
+# Minimize a failing fuzzer input to its smallest form
+fuzz-minimize input: develop _install-parable
+    .venv/bin/python3 tests/fuzz.py minimize "{{input}}"
+
+# Build bash-oracle from source (requires autotools)
+build-oracle:
+    @if [ -d ~/source/bash-oracle ]; then \
+        echo "bash-oracle source exists, rebuilding..."; \
+    else \
+        echo "Cloning bash-oracle..."; \
+        mkdir -p ~/source && git clone https://github.com/ldayton/bash-oracle.git ~/source/bash-oracle; \
+    fi
+    cd ~/source/bash-oracle && ./configure && make
+
 # --- CI Helpers ---
 
 # Run exactly what CI runs
