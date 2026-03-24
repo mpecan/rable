@@ -286,12 +286,11 @@ impl Lexer {
     fn read_token(&mut self) -> Result<Token> {
         self.skip_blanks();
 
-        // Skip comments
-        if self.peek_char() == Some('#') && self.state.command_start {
+        // Skip comments — # starts a comment anywhere after whitespace
+        if self.peek_char() == Some('#') {
             self.skip_comment();
+            self.skip_blanks();
         }
-
-        self.skip_blanks();
 
         if self.at_end() {
             return Ok(Token::eof(self.pos, self.line));
