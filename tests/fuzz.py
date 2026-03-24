@@ -41,12 +41,13 @@ def run_oracle(source, extglob=False):
         cmd.append("extglob")
     try:
         result = subprocess.run(
-            cmd, input=source, capture_output=True, text=True, timeout=5
+            cmd, input=source, capture_output=True, text=True, timeout=5,
+            errors="replace",
         )
         if result.returncode != 0:
             return "<error>"
         return result.stdout.strip()
-    except (subprocess.TimeoutExpired, OSError):
+    except (subprocess.TimeoutExpired, OSError, UnicodeDecodeError):
         return None
 
 

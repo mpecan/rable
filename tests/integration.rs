@@ -210,3 +210,21 @@ fn parable_test_suite() {
     let total = pass + fail;
     eprintln!("Pass rate: {pass}/{total}");
 }
+
+/// Oracle-derived tests: correctness differences found by fuzzing against bash-oracle.
+/// These tests track progress toward full bash compatibility beyond Parable's test suite.
+/// This test reports results but does NOT fail the build.
+#[test]
+fn oracle_test_suite() {
+    let test_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/oracle");
+    if !test_dir.exists() {
+        eprintln!("Skipping: tests/oracle/ directory not found");
+        return;
+    }
+
+    eprintln!("\n=== Oracle Test Suite (bash-oracle compatibility) ===\n");
+    let (pass, fail, _failures) = run_test_files(&test_dir);
+    let total = pass + fail;
+    eprintln!("\n=== Oracle Results: {pass}/{total} passed ({fail} remaining) ===\n");
+    // Intentionally does not assert — these are aspirational targets
+}

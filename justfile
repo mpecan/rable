@@ -85,6 +85,14 @@ fuzz-generate n="5000": develop _install-parable
 fuzz-minimize input: develop _install-parable
     .venv/bin/python3 tests/fuzz.py minimize "{{input}}"
 
+# Regenerate oracle test cases from bash-oracle fuzzing (requires bash-oracle)
+fuzz-generate-tests: develop
+    .venv/bin/python3 tests/generate_oracle_tests.py
+
+# Run the oracle test suite (aspirational — does not fail build)
+test-oracle:
+    cargo test oracle_test_suite -- --nocapture
+
 # Build bash-oracle from source (requires autotools)
 build-oracle:
     @if [ -d ~/source/bash-oracle ]; then \
