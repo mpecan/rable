@@ -207,6 +207,14 @@ fn format_command(words: &[Node], redirects: &[Node], out: &mut String) {
 
 fn format_redirect(node: &Node, out: &mut String) {
     if let Node::Redirect { op, target, fd } = node {
+        // Close-fd redirects: >&- with target fd → output as "fd>&-"
+        if op == ">&-" {
+            if let Node::Word { value, .. } = target.as_ref() {
+                out.push_str(value);
+            }
+            out.push_str(">&-");
+            return;
+        }
         if *fd >= 0 && *fd != default_fd_for_op(op) {
             out.push_str(&fd.to_string());
         }
