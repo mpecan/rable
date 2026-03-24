@@ -333,9 +333,7 @@ impl Parser {
                 TokenType::Pipe => {
                     self.lexer.next_token()?;
                     self.skip_newlines()?;
-                    // After |, time is NOT a keyword — it's a regular command
-                    self.lexer.ctx.command_start = false;
-                    commands.push(self.parse_command()?);
+                    commands.push(self.parse_pipeline_command()?);
                 }
                 TokenType::PipeBoth => {
                     self.lexer.next_token()?;
@@ -343,8 +341,7 @@ impl Parser {
                     if !add_stderr_redirect(commands.last_mut()) {
                         commands.push(make_stderr_redirect());
                     }
-                    self.lexer.ctx.command_start = false;
-                    commands.push(self.parse_command()?);
+                    commands.push(self.parse_pipeline_command()?);
                 }
                 _ => break,
             }
@@ -360,6 +357,43 @@ impl Parser {
     fn check_word(&mut self, expected: &str) -> Result<bool> {
         let tok = self.lexer.peek_token()?;
         Ok(tok.kind == TokenType::Word && tok.value == expected)
+    }
+
+    /// Parse a command after `|` in a pipeline — `time` is a regular word here.
+    fn parse_pipeline_command(&mut self) -> Result<Node> {
+        self.enter()?;
+        let tok = self.lexer.peek_token()?;
+        let is_time = tok.kind == TokenType::Time;
+        let result = if is_time {
+            // After |, time is a regular word, not a keyword.
+            // Temporarily demote it to a Word token.
+            let time_tok = self.lexer.next_token()?;
+            let mut words = vec![word_node(&time_tok.value)];
+            // Check for -p flag (also a word in this context)
+            if self.check_word("-p")? {
+                let p_tok = self.lexer.next_token()?;
+                words.push(word_node(&p_tok.value));
+            }
+            // Parse remaining as simple command, prepending our words
+            let inner = self.parse_simple_command()?;
+            if let Node::Command {
+                words: mut w,
+                redirects,
+            } = inner
+            {
+                words.append(&mut w);
+                Ok(Node::Command { words, redirects })
+            } else {
+                Ok(Node::Command {
+                    words,
+                    redirects: Vec::new(),
+                })
+            }
+        } else {
+            self.parse_command_inner()
+        };
+        self.leave();
+        result
     }
 
     pub(super) fn parse_command(&mut self) -> Result<Node> {
