@@ -136,7 +136,7 @@ impl Parser {
                     if self.at_end()? || self.is_list_terminator()? {
                         break;
                     }
-                    let right = self.parse_top_level_background()?;
+                    let right = self.parse_background()?;
                     left = Node::List {
                         parts: vec![left, Node::Operator { op: ";".into() }, right],
                     };
@@ -580,6 +580,22 @@ impl Parser {
 
     pub(super) fn peek_is(&mut self, kind: TokenType) -> Result<bool> {
         Ok(self.lexer.peek_token()?.kind == kind)
+    }
+
+    /// Expects a closing delimiter — matches either the specific token type
+    /// or a Word with the given value. Used for `}` and `]]` which can be
+    /// either dedicated tokens or plain words depending on context.
+    pub(super) fn expect_closing(&mut self, kind: TokenType, value: &str) -> Result<Token> {
+        let tok = self.lexer.next_token()?;
+        if tok.kind == kind || (tok.kind == TokenType::Word && tok.value == value) {
+            Ok(tok)
+        } else {
+            Err(RableError::parse(
+                format!("expected {value}, got {:?}", tok.value),
+                tok.pos,
+                tok.line,
+            ))
+        }
     }
 
     pub(super) fn expect(&mut self, kind: TokenType) -> Result<Token> {

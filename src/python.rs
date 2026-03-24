@@ -43,7 +43,7 @@ impl ParsedNode {
     }
 
     fn __str__(&self) -> &str {
-        &self.sexp
+        self.to_sexp()
     }
 }
 

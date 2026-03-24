@@ -2,7 +2,7 @@
 //! subshell, brace group, function, coproc, arithmetic command.
 
 use crate::ast::Node;
-use crate::error::{RableError, Result};
+use crate::error::Result;
 use crate::token::{Token, TokenType};
 
 use super::{
@@ -488,15 +488,6 @@ impl Parser {
     }
 
     pub(super) fn expect_brace_close(&mut self) -> Result<Token> {
-        let tok = self.lexer.next_token()?;
-        if tok.kind == TokenType::RightBrace || (tok.kind == TokenType::Word && tok.value == "}") {
-            Ok(tok)
-        } else {
-            Err(RableError::parse(
-                format!("expected }}, got {:?}", tok.value),
-                tok.pos,
-                tok.line,
-            ))
-        }
+        self.expect_closing(TokenType::RightBrace, "}")
     }
 }

@@ -1,7 +1,7 @@
 //! Conditional expression parser for `[[ ... ]]`.
 
 use crate::ast::Node;
-use crate::error::{RableError, Result};
+use crate::error::Result;
 use crate::token::{Token, TokenType};
 
 use super::{
@@ -117,18 +117,7 @@ impl Parser {
     }
 
     fn expect_cond_close(&mut self) -> Result<Token> {
-        let tok = self.lexer.next_token()?;
-        if tok.kind == TokenType::DoubleRightBracket
-            || (tok.kind == TokenType::Word && tok.value == "]]")
-        {
-            Ok(tok)
-        } else {
-            Err(RableError::parse(
-                format!("expected ]], got {:?}", tok.value),
-                tok.pos,
-                tok.line,
-            ))
-        }
+        self.expect_closing(TokenType::DoubleRightBracket, "]]")
     }
 
     fn is_cond_close(&mut self) -> Result<bool> {
