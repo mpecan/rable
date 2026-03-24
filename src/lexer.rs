@@ -812,9 +812,13 @@ impl Lexer {
                 }
                 Some('\\') => {
                     self.advance_char();
-                    value.push('\\');
-                    if let Some(c) = self.advance_char() {
-                        value.push(c);
+                    if self.peek_char() == Some('\n') {
+                        self.advance_char(); // line continuation
+                    } else {
+                        value.push('\\');
+                        if let Some(c) = self.advance_char() {
+                            value.push(c);
+                        }
                     }
                 }
                 Some('$') => {
