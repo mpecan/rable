@@ -537,46 +537,51 @@ fn indent_str(out: &mut String, n: usize) {
     }
 }
 
-/// Process a word value for canonical output:
-/// - Strip `$"..."` locale prefix → `"..."`
-/// - Process `$'...'` ANSI-C → `'processed'` (with processed escapes)
+/// Process a word value for canonical bash output using the same segment
+/// pipeline as S-expression formatting. This ensures consistent handling
+/// of `$'...'`, `$"..."`, and `$(...)` across both output paths.
 fn process_word_value(value: &str) -> String {
+    use crate::sexp::word::{WordSegment, parse_word_segments};
+
+    let segments = parse_word_segments(value);
     let mut result = String::with_capacity(value.len());
-    let chars: Vec<char> = value.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] == '$' && i + 1 < chars.len() {
-            if chars[i + 1] == '"' {
-                // $"..." → "..." (strip $ prefix)
-                i += 1; // skip $
-            } else if chars[i + 1] == '\'' {
-                // $'...' → 'processed' (process escapes, output with quotes)
-                i += 2; // skip $'
-                let mut content = String::new();
-                while i < chars.len() && chars[i] != '\'' {
-                    if chars[i] == '\\' && i + 1 < chars.len() {
-                        content.push('\\');
-                        i += 1;
-                    }
-                    content.push(chars[i]);
-                    i += 1;
-                }
-                if i < chars.len() {
-                    i += 1; // skip closing '
-                }
-                let ac_chars: Vec<char> = content.chars().collect();
+
+    for seg in &segments {
+        match seg {
+            WordSegment::Literal(text) => result.push_str(text),
+            WordSegment::AnsiCQuote(raw_content) => {
+                let chars: Vec<char> = raw_content.chars().collect();
                 let mut pos = 0;
-                let processed = crate::sexp::process_ansi_c_content(&ac_chars, &mut pos);
+                let processed = crate::sexp::process_ansi_c_content(&chars, &mut pos);
                 result.push('\'');
                 result.push_str(&processed);
                 result.push('\'');
-            } else {
-                result.push(chars[i]);
-                i += 1;
             }
-        } else {
-            result.push(chars[i]);
-            i += 1;
+            WordSegment::LocaleString(content) => {
+                // $"..." → "..." (content includes the "..." delimiters)
+                result.push_str(content);
+            }
+            WordSegment::CommandSubstitution(content) => {
+                result.push_str("$(");
+                if let Some(reformatted) = reformat_bash(content) {
+                    result.push_str(&reformatted);
+                } else {
+                    let normalized = crate::sexp::normalize_cmdsub_content(content);
+                    result.push_str(&normalized);
+                }
+                result.push(')');
+            }
+            WordSegment::ProcessSubstitution(direction, content) => {
+                result.push(*direction);
+                result.push('(');
+                if let Some(reformatted) = reformat_bash(content) {
+                    result.push_str(&reformatted);
+                } else {
+                    let normalized = crate::sexp::normalize_cmdsub_content(content);
+                    result.push_str(&normalized);
+                }
+                result.push(')');
+            }
         }
     }
     result

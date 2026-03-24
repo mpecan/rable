@@ -381,7 +381,7 @@ pub(super) fn extract_paren_content(chars: &[char], pos: &mut usize) -> String {
 /// - Strips leading/trailing whitespace and newlines
 /// - Strips trailing semicolons
 /// - Adds space after `<` for file reading shortcuts
-pub(super) fn normalize_cmdsub_content(content: &str) -> String {
+pub(crate) fn normalize_cmdsub_content(content: &str) -> String {
     let trimmed = content.trim();
     let stripped = trimmed.strip_suffix(';').unwrap_or(trimmed).trim_end();
     // Normalize $(<file) to $(< file)
