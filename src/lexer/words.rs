@@ -204,6 +204,7 @@ impl Lexer {
     }
 
     /// Reads a process substitution `<(...)` or `>(...)` as a word token.
+    /// Continues reading word characters after the closing `)`.
     pub(super) fn read_process_sub_word(&mut self, start: usize, line: usize) -> Result<Token> {
         let mut value = String::new();
         // Read < or >
@@ -214,7 +215,30 @@ impl Lexer {
         value.push('(');
         // Read until matching )
         self.read_matched_parens(&mut value, 1)?;
+        // Continue reading word chars after the process substitution
+        // e.g., <(cmd)suffix or >(cat)ca
+        self.continue_word(&mut value)?;
         self.ctx.command_start = false;
         Ok(Token::new(TokenType::Word, value, start, line))
+    }
+
+    /// Continue reading word characters after a special construct (process sub, etc).
+    fn continue_word(&mut self, value: &mut String) -> Result<()> {
+        while let Some(c) = self.peek_char() {
+            match c {
+                ' ' | '\t' | '\n' | '|' | '&' | ';' | ')' | '<' | '>' | '(' => break,
+                '\'' | '"' | '\\' | '$' | '`' => {
+                    self.read_word_special(value, c)?;
+                }
+                '[' if !value.is_empty() && value != "[" && !value.ends_with('[') => {
+                    self.read_bracket_subscript(value)?;
+                }
+                _ => {
+                    self.advance_char();
+                    value.push(c);
+                }
+            }
+        }
+        Ok(())
     }
 }
