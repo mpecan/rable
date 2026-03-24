@@ -55,6 +55,14 @@ impl Lexer {
                 '!' | '*' if self.input.get(self.pos + 1) == Some(&'(') && self.config.extglob => {
                     self.read_extglob(&mut value, c)?;
                 }
+                // `[` inside a word starts a subscript/bracket context
+                // Everything until matching `]` is part of the same word
+                // (including spaces, operators, etc.)
+                // Only applies when the word has content that isn't just `[` or `[[`
+                // (those are test/conditional command syntax, not subscripts)
+                '[' if !value.is_empty() && value != "[" && !value.ends_with('[') => {
+                    self.read_bracket_subscript(&mut value)?;
+                }
                 // Regular character
                 _ => {
                     self.advance_char();
@@ -133,6 +141,57 @@ impl Lexer {
         self.advance_char();
         value.push('(');
         self.read_matched_parens(value, 1)
+    }
+
+    /// Reads a bracket subscript `[...]` inside a word.
+    /// Includes all content until the matching `]`, treating spaces
+    /// and operators as literal (array subscripts can contain spaces).
+    pub(super) fn read_bracket_subscript(&mut self, value: &mut String) -> Result<()> {
+        self.advance_char(); // consume [
+        value.push('[');
+        let mut depth = 1;
+        while let Some(c) = self.peek_char() {
+            match c {
+                '[' => {
+                    depth += 1;
+                    self.advance_char();
+                    value.push(c);
+                }
+                ']' => {
+                    depth -= 1;
+                    self.advance_char();
+                    value.push(c);
+                    if depth == 0 {
+                        return Ok(());
+                    }
+                }
+                '\'' => {
+                    self.advance_char();
+                    value.push('\'');
+                    self.read_single_quoted(value)?;
+                }
+                '"' => {
+                    self.advance_char();
+                    value.push('"');
+                    self.read_double_quoted(value)?;
+                }
+                '\\' => {
+                    self.advance_char();
+                    value.push('\\');
+                    if let Some(nc) = self.advance_char() {
+                        value.push(nc);
+                    }
+                }
+                '$' => {
+                    self.read_dollar(value)?;
+                }
+                _ => {
+                    self.advance_char();
+                    value.push(c);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Reads a process substitution into an existing word value.
