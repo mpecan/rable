@@ -493,6 +493,15 @@ impl Parser {
             });
         }
 
+        // >&- and <&- are complete close-fd operators (no target needed)
+        if op_tok.value == ">&-" || op_tok.value == "<&-" {
+            return Ok(Node::Redirect {
+                op: ">&-".to_string(),
+                target: Box::new(word_node("0")),
+                fd,
+            });
+        }
+
         let target_tok = self.lexer.next_token()?;
         let is_dup = op_tok.kind == TokenType::GreaterAnd || op_tok.kind == TokenType::LessAnd;
 

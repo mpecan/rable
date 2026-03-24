@@ -96,7 +96,13 @@ impl Lexer {
             }
             Some('&') => {
                 self.advance_char();
-                Ok(Token::new(TokenType::LessAnd, "<&", start, line))
+                // <&- is close-fd (complete operator)
+                if self.peek_char() == Some('-') {
+                    self.advance_char();
+                    Ok(Token::new(TokenType::LessAnd, "<&-", start, line))
+                } else {
+                    Ok(Token::new(TokenType::LessAnd, "<&", start, line))
+                }
             }
             Some('>') => {
                 self.advance_char();
@@ -116,7 +122,13 @@ impl Lexer {
             }
             Some('&') => {
                 self.advance_char();
-                Ok(Token::new(TokenType::GreaterAnd, ">&", start, line))
+                // >&- is close-fd (complete operator)
+                if self.peek_char() == Some('-') {
+                    self.advance_char();
+                    Ok(Token::new(TokenType::GreaterAnd, ">&-", start, line))
+                } else {
+                    Ok(Token::new(TokenType::GreaterAnd, ">&", start, line))
+                }
             }
             Some('|') => {
                 self.advance_char();
