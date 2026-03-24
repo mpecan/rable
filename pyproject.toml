@@ -1,0 +1,21 @@
+[build-system]
+requires = ["maturin>=1.7"]
+build-backend = "maturin"
+
+[project]
+name = "rable"
+version = "0.1.0"
+description = "A Rust implementation of the Parable bash parser"
+requires-python = ">=3.12"
+license = "MIT"
+keywords = ["bash", "parser", "shell", "ast"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+    "Topic :: Software Development :: Compilers",
+    "Topic :: System :: Shells",
+]
+
+[tool.maturin]
+features = ["python"]
