@@ -428,8 +428,13 @@ impl Parser {
                 }
                 TokenType::Word | TokenType::AssignmentWord | TokenType::Number => {
                     let tok = self.lexer.next_token()?;
-                    // fd numbers before redirects — but &> and &>> never take fd prefix
-                    if is_fd_number(&tok.value)
+                    // fd numbers before redirects — only when adjacent (no space)
+                    // and never before &> or &>>
+                    let fd_end = tok.pos + tok.value.len();
+                    let next_pos = self.lexer.peek_token().map(|t| t.pos).unwrap_or(0);
+                    let adjacent = fd_end == next_pos;
+                    if adjacent
+                        && is_fd_number(&tok.value)
                         && self.is_redirect_operator()?
                         && !self.is_and_redirect()?
                     {
