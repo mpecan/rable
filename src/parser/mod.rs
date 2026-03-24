@@ -428,7 +428,11 @@ impl Parser {
                 }
                 TokenType::Word | TokenType::AssignmentWord | TokenType::Number => {
                     let tok = self.lexer.next_token()?;
-                    if is_fd_number(&tok.value) && self.is_redirect_operator()? {
+                    // fd numbers before redirects — but &> and &>> never take fd prefix
+                    if is_fd_number(&tok.value)
+                        && self.is_redirect_operator()?
+                        && !self.is_and_redirect()?
+                    {
                         redirects.push(self.parse_redirect_with_fd(&tok)?);
                     } else if is_varfd(&tok.value) && self.is_redirect_operator()? {
                         redirects.push(self.parse_redirect()?);
@@ -566,6 +570,15 @@ impl Parser {
             }
         }
         Ok(redirects)
+    }
+
+    /// Returns true if the next token is `&>` or `&>>` (which never take fd prefixes).
+    fn is_and_redirect(&mut self) -> Result<bool> {
+        let tok = self.lexer.peek_token()?;
+        Ok(matches!(
+            tok.kind,
+            TokenType::AndGreater | TokenType::AndDoubleGreater
+        ))
     }
 
     pub(super) fn is_redirect_operator(&mut self) -> Result<bool> {
