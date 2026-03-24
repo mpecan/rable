@@ -69,11 +69,13 @@ impl fmt::Display for Node {
                 body,
                 redirects,
             } => {
-                write!(f, "(arith-for")?;
-                write!(f, " (init (word \"{init}\"))")?;
-                write!(f, " (test (word \"{cond}\"))")?;
-                write!(f, " (step (word \"{incr}\"))")?;
-                write!(f, " {body})")?;
+                write!(f, "(arith-for (init (word \"")?;
+                write_escaped_word(f, init)?;
+                write!(f, "\")) (test (word \"")?;
+                write_escaped_word(f, cond)?;
+                write!(f, "\")) (step (word \"")?;
+                write_escaped_word(f, incr)?;
+                write!(f, "\")) {body})")?;
                 write_redirects(f, redirects)
             }
             Self::Select {
@@ -150,11 +152,9 @@ impl fmt::Display for Node {
                 raw_content,
                 ..
             } => {
-                if raw_content.is_empty() {
-                    write!(f, "(arith (word \"\"))")?;
-                } else {
-                    write!(f, "(arith (word \"{raw_content}\"))")?;
-                }
+                write!(f, "(arith (word \"")?;
+                write_escaped_word(f, raw_content)?;
+                write!(f, "\"))")?;
                 write_redirects(f, redirects)
             }
 

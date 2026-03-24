@@ -333,6 +333,8 @@ impl Parser {
                 TokenType::Pipe => {
                     self.lexer.next_token()?;
                     self.skip_newlines()?;
+                    // After |, time is NOT a keyword — it's a regular command
+                    self.lexer.ctx.command_start = false;
                     commands.push(self.parse_command()?);
                 }
                 TokenType::PipeBoth => {
@@ -341,6 +343,7 @@ impl Parser {
                     if !add_stderr_redirect(commands.last_mut()) {
                         commands.push(make_stderr_redirect());
                     }
+                    self.lexer.ctx.command_start = false;
                     commands.push(self.parse_command()?);
                 }
                 _ => break,
