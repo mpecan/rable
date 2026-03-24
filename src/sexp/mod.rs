@@ -464,6 +464,9 @@ pub(crate) fn process_ansi_c_content(chars: &[char], pos: &mut usize) -> String 
                             *pos += 1;
                         }
                         return out;
+                    } else if hex > 0x7F {
+                        // High bytes are invalid standalone UTF-8 — replacement char
+                        out.push('\u{FFFD}');
                     } else if let Some(ch) = char::from_u32(hex) {
                         out.push(ch);
                     }

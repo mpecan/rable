@@ -102,10 +102,16 @@ pub fn parse_word_segments(value: &str) -> Vec<WordSegment> {
                     }
                 }
                 '"' => {
-                    flush_literal(&mut literal, &mut segments);
-                    i += 1; // skip $, keep "
-                    let content = extract_locale_content(&chars, &mut i);
-                    segments.push(WordSegment::LocaleString(content));
+                    if in_double_quote {
+                        // $" inside double quotes is literal (not a locale string)
+                        literal.push(chars[i]);
+                        i += 1;
+                    } else {
+                        flush_literal(&mut literal, &mut segments);
+                        i += 1; // skip $, keep "
+                        let content = extract_locale_content(&chars, &mut i);
+                        segments.push(WordSegment::LocaleString(content));
+                    }
                 }
                 '{' => {
                     literal.push(chars[i]);
