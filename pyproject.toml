@@ -6,6 +6,7 @@ build-backend = "maturin"
 name = "rable"
 version = "0.1.3"
 description = "A Rust implementation of the Parable bash parser"
+readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 keywords = ["bash", "parser", "shell", "ast"]
