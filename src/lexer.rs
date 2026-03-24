@@ -94,6 +94,11 @@ impl Lexer {
                 if c == '\n' {
                     break;
                 }
+                // Line continuation in unquoted heredoc: \<newline> joins lines
+                if c == '\\' && self.peek_char() == Some('\n') {
+                    self.advance_char(); // skip the newline
+                    continue; // join with next line
+                }
                 line.push(c);
             }
             // Check if this line matches the delimiter
@@ -170,13 +175,23 @@ impl Lexer {
         ch
     }
 
-    /// Skips blanks (spaces and tabs).
+    /// Skips blanks (spaces and tabs) and line continuations (`\<newline>`).
     fn skip_blanks(&mut self) {
-        while let Some(c) = self.peek_char() {
-            if c == ' ' || c == '\t' {
-                self.advance_char();
-            } else {
-                break;
+        loop {
+            match self.peek_char() {
+                Some(' ' | '\t') => {
+                    self.advance_char();
+                }
+                Some('\\') => {
+                    // Line continuation: \<newline> → skip both
+                    if self.input.get(self.pos + 1) == Some(&'\n') {
+                        self.advance_char(); // skip \
+                        self.advance_char(); // skip \n
+                    } else {
+                        break;
+                    }
+                }
+                _ => break,
             }
         }
     }
@@ -587,9 +602,14 @@ impl Lexer {
                 }
                 Some('\\') => {
                     self.advance_char();
-                    value.push('\\');
-                    if let Some(next) = self.advance_char() {
-                        value.push(next);
+                    // Line continuation: \<newline> is removed in double quotes
+                    if self.peek_char() == Some('\n') {
+                        self.advance_char();
+                    } else {
+                        value.push('\\');
+                        if let Some(next) = self.advance_char() {
+                            value.push(next);
+                        }
                     }
                 }
                 Some('$') => {
@@ -630,9 +650,13 @@ impl Lexer {
             }
             '\\' => {
                 self.advance_char();
-                value.push('\\');
-                if let Some(next) = self.advance_char() {
-                    value.push(next);
+                if self.peek_char() == Some('\n') {
+                    self.advance_char(); // line continuation
+                } else {
+                    value.push('\\');
+                    if let Some(next) = self.advance_char() {
+                        value.push(next);
+                    }
                 }
             }
             '$' => {
@@ -802,9 +826,13 @@ impl Lexer {
                 }
                 Some('\\') => {
                     self.advance_char();
-                    value.push('\\');
-                    if let Some(c) = self.advance_char() {
-                        value.push(c);
+                    if self.peek_char() == Some('\n') {
+                        self.advance_char(); // line continuation
+                    } else {
+                        value.push('\\');
+                        if let Some(c) = self.advance_char() {
+                            value.push(c);
+                        }
                     }
                 }
                 Some('$') => {

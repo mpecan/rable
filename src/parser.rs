@@ -1306,18 +1306,42 @@ fn fill_heredoc_contents(node: &mut Node, lexer: &mut Lexer) {
 /// Returns (delimiter, quoted).
 #[allow(clippy::option_if_let_else)]
 fn parse_heredoc_delimiter(raw: &str) -> (String, bool) {
-    // 'EOF' or "EOF" → quoted (no expansion)
-    if let Some(inner) = raw
-        .strip_prefix('\'')
-        .and_then(|s| s.strip_suffix('\''))
-        .or_else(|| raw.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
-    {
-        (inner.to_string(), true)
-    } else if let Some(rest) = raw.strip_prefix('\\') {
-        (rest.to_string(), true)
-    } else {
-        (raw.to_string(), false)
+    // Strip all quotes from the delimiter. If any quotes were present, it's quoted.
+    let mut result = String::new();
+    let mut quoted = false;
+    let mut chars = raw.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' => {
+                quoted = true;
+                // Read until closing '
+                for c in chars.by_ref() {
+                    if c == '\'' {
+                        break;
+                    }
+                    result.push(c);
+                }
+            }
+            '"' => {
+                quoted = true;
+                // Read until closing "
+                for c in chars.by_ref() {
+                    if c == '"' {
+                        break;
+                    }
+                    result.push(c);
+                }
+            }
+            '\\' => {
+                quoted = true;
+                if let Some(next) = chars.next() {
+                    result.push(next);
+                }
+            }
+            _ => result.push(c),
+        }
     }
+    (result, quoted)
 }
 
 /// Returns true if the string is a conditional binary operator.
