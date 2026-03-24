@@ -152,6 +152,11 @@ fn format_node(node: &Node, out: &mut String, indent: usize) {
             }
             format_node(command, out, indent);
         }
+        Node::ConditionalExpr { body, .. } => {
+            out.push_str("[[ ");
+            format_cond_node(body, out);
+            out.push_str(" ]]");
+        }
         Node::Empty => {}
         _ => {
             out.push_str(&node.to_string());
@@ -348,6 +353,49 @@ fn format_function_body(body: &Node, out: &mut String, indent: usize) {
         out.push('}');
     } else {
         format_node(body, out, indent);
+    }
+}
+
+/// Formats a conditional expression node as canonical bash source.
+fn format_cond_node(node: &Node, out: &mut String) {
+    match node {
+        Node::UnaryTest { op, operand } => {
+            out.push_str(op);
+            out.push(' ');
+            format_cond_node(operand, out);
+        }
+        Node::BinaryTest { op, left, right } => {
+            format_cond_node(left, out);
+            out.push(' ');
+            out.push_str(op);
+            out.push(' ');
+            format_cond_node(right, out);
+        }
+        Node::CondAnd { left, right } => {
+            format_cond_node(left, out);
+            out.push_str(" && ");
+            format_cond_node(right, out);
+        }
+        Node::CondOr { left, right } => {
+            format_cond_node(left, out);
+            out.push_str(" || ");
+            format_cond_node(right, out);
+        }
+        Node::CondNot { operand } => {
+            out.push_str("! ");
+            format_cond_node(operand, out);
+        }
+        Node::CondTerm { value } => {
+            out.push_str(value);
+        }
+        Node::CondParen { inner } => {
+            out.push_str("( ");
+            format_cond_node(inner, out);
+            out.push_str(" )");
+        }
+        _ => {
+            out.push_str(&node.to_string());
+        }
     }
 }
 

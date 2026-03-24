@@ -688,11 +688,15 @@ fn write_redirect(f: &mut fmt::Formatter<'_>, op: &str, target: &Node, _fd: i32)
             op.starts_with(">&") || op.starts_with("<&") || op.ends_with("&-") || op.ends_with('&');
         if is_fd_op && value.chars().all(|c| c.is_ascii_digit() || c == '-') {
             write!(f, "{value})")
-        } else if value.starts_with("$'") || value.starts_with("$\"") {
-            // Process ANSI-C and locale strings in redirect targets
-            write!(f, "\"")?;
-            write_word_value(f, value)?;
-            write!(f, "\")")
+        } else if value.starts_with("$\"") {
+            // Locale string in redirect: strip $ prefix, preserve literal quotes
+            write!(f, "\"{}\")", &value[1..])
+        } else if value.starts_with("$'") {
+            // ANSI-C in redirect: process escapes, output with literal newlines
+            let chars: Vec<char> = value.chars().collect();
+            let mut pos = 2; // skip $'
+            let processed = process_ansi_c_content(&chars, &mut pos);
+            write!(f, "\"'{processed}'\")")
         } else {
             write!(f, "\"{value}\")")
         }
