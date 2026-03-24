@@ -32,7 +32,7 @@ impl Lexer {
                     } else if value.ends_with('@')
                         || value.ends_with('?')
                         || value.ends_with('+')
-                        || value.ends_with('!')
+                        || (value.ends_with('!') && self.config.extglob)
                         || (value.ends_with('*') && self.config.extglob)
                     {
                         // Extglob: @(...), ?(...), etc.
@@ -47,11 +47,12 @@ impl Lexer {
                     self.read_word_special(&mut value, c)?;
                 }
                 // Extglob: @(...), ?(...), +(...), !(...)
-                '@' | '?' | '+' | '!' if self.input.get(self.pos + 1) == Some(&'(') => {
+                // !( is only extglob when extglob is enabled; otherwise ! is Bang
+                '@' | '?' | '+' if self.input.get(self.pos + 1) == Some(&'(') => {
                     self.read_extglob(&mut value, c)?;
                 }
-                // * extglob only when extglob mode is enabled
-                '*' if self.input.get(self.pos + 1) == Some(&'(') && self.config.extglob => {
+                // !( and *( are only extglob when extglob mode is enabled
+                '!' | '*' if self.input.get(self.pos + 1) == Some(&'(') && self.config.extglob => {
                     self.read_extglob(&mut value, c)?;
                 }
                 // Regular character

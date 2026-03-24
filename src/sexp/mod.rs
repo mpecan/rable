@@ -19,7 +19,8 @@ impl fmt::Display for Node {
             Self::Pipeline { commands } => write_pipeline(f, commands),
             Self::List { parts } => write_list(f, parts),
             Self::Operator { op } => write!(f, "{}", operator_name(op)),
-            Self::Empty | Self::PipeBoth => Ok(()),
+            Self::Empty => write!(f, "(command)"),
+            Self::PipeBoth => Ok(()),
             Self::Comment { text } => write!(f, "(comment \"{text}\")"),
 
             // Compound commands
@@ -468,31 +469,67 @@ pub(crate) fn process_ansi_c_content(chars: &[char], pos: &mut usize) -> String 
                         // No hex digits consumed — output literal \x
                         out.push('\\');
                         out.push('x');
-                    } else if hex > 0
-                        && let Some(ch) = char::from_u32(hex)
-                    {
+                    } else if hex == 0 {
+                        // NUL byte truncates the string
+                        while *pos < chars.len() && chars[*pos] != '\'' {
+                            *pos += 1;
+                        }
+                        if *pos < chars.len() {
+                            *pos += 1;
+                        }
+                        return out;
+                    } else if let Some(ch) = char::from_u32(hex) {
                         out.push(ch);
                     }
-                    // hex == 0 with digits consumed → NUL, dropped
                 }
                 'u' => {
-                    // Unicode: \uNNNN
+                    // Unicode: \uNNNN — if no hex digits, output literal \u
+                    let before = *pos;
                     let val = read_hex(chars, pos, 4);
-                    if let Some(ch) = char::from_u32(val) {
-                        out.push(ch);
-                    }
-                }
-                'U' => {
-                    // Unicode long: \UNNNNNNNN — NUL (val==0) is dropped
-                    let val = read_hex(chars, pos, 8);
-                    if val > 0
+                    if *pos == before {
+                        out.push('\\');
+                        out.push('u');
+                    } else if val > 0
                         && let Some(ch) = char::from_u32(val)
                     {
                         out.push(ch);
                     }
+                    // val==0 with digits → NUL, truncate
+                    else if val == 0 && *pos > before {
+                        while *pos < chars.len() && chars[*pos] != '\'' {
+                            *pos += 1;
+                        }
+                        if *pos < chars.len() {
+                            *pos += 1;
+                        }
+                        return out;
+                    }
+                }
+                'U' => {
+                    // Unicode long: \UNNNNNNNN — if no hex digits, output literal \U
+                    let before = *pos;
+                    let val = read_hex(chars, pos, 8);
+                    if *pos == before {
+                        out.push('\\');
+                        out.push('U');
+                    } else if val > 0
+                        && let Some(ch) = char::from_u32(val)
+                    {
+                        out.push(ch);
+                    }
+                    // val==0 with digits → NUL, truncate
+                    else if val == 0 && *pos > before {
+                        while *pos < chars.len() && chars[*pos] != '\'' {
+                            *pos += 1;
+                        }
+                        if *pos < chars.len() {
+                            *pos += 1;
+                        }
+                        return out;
+                    }
                 }
                 '0'..='7' => {
-                    // Octal escape — NUL is dropped
+                    // Octal escape — NUL terminates the string (bash behavior)
                     let mut val = u32::from(esc as u8 - b'0');
                     for _ in 0..2 {
                         if *pos < chars.len() && chars[*pos] >= '0' && chars[*pos] <= '7' {
@@ -500,9 +537,18 @@ pub(crate) fn process_ansi_c_content(chars: &[char], pos: &mut usize) -> String 
                             *pos += 1;
                         }
                     }
-                    if val > 0
-                        && let Some(ch) = char::from_u32(val)
-                    {
+                    if val == 0 {
+                        // NUL byte truncates the string in bash
+                        // Skip to closing quote
+                        while *pos < chars.len() && chars[*pos] != '\'' {
+                            *pos += 1;
+                        }
+                        if *pos < chars.len() {
+                            *pos += 1; // skip closing '
+                        }
+                        return out;
+                    }
+                    if let Some(ch) = char::from_u32(val) {
                         out.push(ch);
                     }
                 }
