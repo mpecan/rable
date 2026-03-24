@@ -445,6 +445,10 @@ pub(crate) fn process_ansi_c_content(chars: &[char], pos: &mut usize) -> String 
                             out.push(ch);
                         }
                         // \c@ or val==0 → NUL, which is dropped
+                    } else {
+                        // \c at end of string — output literal \c
+                        out.push('\\');
+                        out.push('c');
                     }
                 }
                 '\'' => {
@@ -457,13 +461,19 @@ pub(crate) fn process_ansi_c_content(chars: &[char], pos: &mut usize) -> String 
                 }
                 '"' => out.push('"'),
                 'x' => {
-                    // Hex escape: \xNN — NUL is dropped
+                    // Hex escape: \xNN — if no valid hex digits, output literal \x
+                    let before = *pos;
                     let hex = read_hex(chars, pos, 2);
-                    if hex > 0
+                    if *pos == before {
+                        // No hex digits consumed — output literal \x
+                        out.push('\\');
+                        out.push('x');
+                    } else if hex > 0
                         && let Some(ch) = char::from_u32(hex)
                     {
                         out.push(ch);
                     }
+                    // hex == 0 with digits consumed → NUL, dropped
                 }
                 'u' => {
                     // Unicode: \uNNNN
@@ -473,9 +483,11 @@ pub(crate) fn process_ansi_c_content(chars: &[char], pos: &mut usize) -> String 
                     }
                 }
                 'U' => {
-                    // Unicode long: \UNNNNNNNN
+                    // Unicode long: \UNNNNNNNN — NUL (val==0) is dropped
                     let val = read_hex(chars, pos, 8);
-                    if let Some(ch) = char::from_u32(val) {
+                    if val > 0
+                        && let Some(ch) = char::from_u32(val)
+                    {
                         out.push(ch);
                     }
                 }

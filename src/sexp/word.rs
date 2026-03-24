@@ -205,28 +205,44 @@ pub fn write_word_value(f: &mut fmt::Formatter<'_>, value: &str) -> fmt::Result 
     write_word_segments(f, &segments)
 }
 
-/// Detects `name=(...)` array patterns and normalizes whitespace/comments.
+/// Detects `name=(...)` or `name+=(...)` array patterns and normalizes whitespace/comments.
 fn try_normalize_array(value: &str) -> Option<String> {
     // Find the `=(` pattern
     let eq_paren = value.find("=(")?;
     let prefix = &value[..=eq_paren]; // includes `=`
-    let rest = &value[eq_paren + 1..]; // starts with `(`
+    let after_eq = &value[eq_paren + 1..]; // starts with `(`
 
-    // Must start with `(` and end with `)`
-    if !rest.starts_with('(') || !rest.ends_with(')') {
+    if !after_eq.starts_with('(') {
         return None;
     }
 
-    // Only normalize if content has whitespace/comments that need it
-    let inner = &rest[1..rest.len() - 1];
-    if !inner.contains('\n') && !inner.contains('\t') && !inner.contains('#') {
+    // Find the matching `)` using depth tracking
+    let chars: Vec<char> = after_eq.chars().collect();
+    let mut depth = 0;
+    let mut close_pos = None;
+    for (j, &c) in chars.iter().enumerate() {
+        if c == '(' {
+            depth += 1;
+        } else if c == ')' {
+            depth -= 1;
+            if depth == 0 {
+                close_pos = Some(j);
+                break;
+            }
+        }
+    }
+    let close = close_pos?;
+    let inner_chars: String = chars[1..close].iter().collect();
+    let suffix: String = chars[close + 1..].iter().collect();
+
+    // Always normalize — even just trimming trailing spaces matters
+    if inner_chars.is_empty() {
         return None;
     }
+    let inner = &inner_chars;
 
     let normalized = normalize_array_content(inner);
-    // Process command substitutions inside the array
-    let result = format!("{prefix}({normalized})");
-    // Now process word segments on the result to handle $() inside arrays
+    let result = format!("{prefix}({normalized}){suffix}");
     Some(result)
 }
 
@@ -247,11 +263,15 @@ fn normalize_array_content(inner: &str) -> String {
                 i += 1;
             }
             '#' => {
-                // Skip comment until end of line
-                if !current.is_empty() {
-                    elements.push(std::mem::take(&mut current));
-                }
-                while i < chars.len() && chars[i] != '\n' {
+                // # is only a comment when preceded by whitespace (current is empty)
+                if current.is_empty() {
+                    // Skip comment until end of line
+                    while i < chars.len() && chars[i] != '\n' {
+                        i += 1;
+                    }
+                } else {
+                    // # is part of the word (e.g., b# or [1]=b#)
+                    current.push(chars[i]);
                     i += 1;
                 }
             }

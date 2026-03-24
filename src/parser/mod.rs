@@ -71,7 +71,7 @@ impl Parser {
     /// so that newline-separated commands become separate nodes.
     fn parse_top_level_list(&mut self) -> Result<Node> {
         self.enter()?;
-        let mut left = self.parse_background()?;
+        let mut left = self.parse_top_level_background()?;
 
         loop {
             if self.at_end()? {
@@ -136,7 +136,7 @@ impl Parser {
                     if self.at_end()? || self.is_list_terminator()? {
                         break;
                     }
-                    let right = self.parse_background()?;
+                    let right = self.parse_top_level_background()?;
                     left = Node::List {
                         parts: vec![left, Node::Operator { op: ";".into() }, right],
                     };
@@ -149,6 +149,45 @@ impl Parser {
         }
 
         self.leave();
+        Ok(left)
+    }
+
+    /// Like `parse_background` but stops at newlines — `&\n` creates a trailing
+    /// background operator and returns, letting `parse_all` handle the next line.
+    fn parse_top_level_background(&mut self) -> Result<Node> {
+        let mut left = self.parse_and_or()?;
+
+        loop {
+            if self.at_end()? {
+                break;
+            }
+            if self.lexer.peek_token()?.kind != TokenType::Ampersand {
+                break;
+            }
+            self.lexer.next_token()?;
+            // At top level, don't skip newlines after & — newline means next node
+            if self.at_end()?
+                || self.is_list_terminator()?
+                || self.lexer.peek_token()?.kind == TokenType::Newline
+            {
+                left = Node::List {
+                    parts: vec![left, Node::Operator { op: "&".into() }],
+                };
+                break;
+            }
+            let peek = self.lexer.peek_token()?;
+            if peek.kind == TokenType::Semi {
+                left = Node::List {
+                    parts: vec![left, Node::Operator { op: "&".into() }],
+                };
+                break;
+            }
+            let right = self.parse_and_or()?;
+            left = Node::List {
+                parts: vec![left, Node::Operator { op: "&".into() }, right],
+            };
+        }
+
         Ok(left)
     }
 
