@@ -1205,7 +1205,6 @@ impl Parser {
     }
 }
 
-/// Creates a `cond-term` node for conditional expressions.
 /// Creates a `Word` node with no parts.
 fn word_node(value: &str) -> Node {
     Node::Word {
