@@ -249,14 +249,16 @@ fn write_word_value(f: &mut fmt::Formatter<'_>, value: &str) -> fmt::Result {
     let chars: Vec<char> = value.chars().collect();
 
     while i < chars.len() {
-        if i + 1 < chars.len() && chars[i] == '$' && chars[i + 1] == '\'' {
+        // Don't trigger $-processing if $ is escaped
+        let prev_backslash = i > 0 && chars[i - 1] == '\\';
+        if i + 1 < chars.len() && chars[i] == '$' && chars[i + 1] == '\'' && !prev_backslash {
             // ANSI-C quoting
             i += 2;
             let processed = process_ansi_c_content(&chars, &mut i);
             write_escaped_word(f, "'")?;
             write_escaped_word(f, &processed)?;
             write_escaped_word(f, "'")?;
-        } else if i + 1 < chars.len() && chars[i] == '$' && chars[i + 1] == '"' {
+        } else if i + 1 < chars.len() && chars[i] == '$' && chars[i + 1] == '"' && !prev_backslash {
             // Locale string — strip $
             i += 1;
             while i < chars.len() {
@@ -267,7 +269,7 @@ fn write_word_value(f: &mut fmt::Formatter<'_>, value: &str) -> fmt::Result {
                 }
                 i += 1;
             }
-        } else if i + 1 < chars.len() && chars[i] == '$' && chars[i + 1] == '(' {
+        } else if i + 1 < chars.len() && chars[i] == '$' && chars[i + 1] == '(' && !prev_backslash {
             // Check for $(( )) arithmetic — don't reformat
             if i + 2 < chars.len() && chars[i + 2] == '(' {
                 // Arithmetic expansion: $((...)) — output raw

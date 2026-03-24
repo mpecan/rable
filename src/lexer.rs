@@ -782,6 +782,7 @@ impl Lexer {
     }
 
     /// Reads until matching closing parentheses.
+    #[allow(clippy::too_many_lines)]
     fn read_matched_parens(&mut self, value: &mut String, close_count: usize) -> Result<()> {
         let mut depth = close_count;
         loop {
@@ -827,6 +828,22 @@ impl Lexer {
                     self.advance_char();
                     value.push('`');
                     self.read_backtick(value)?;
+                }
+                Some('#') => {
+                    // # is a comment when preceded by whitespace/newline
+                    let prev = value.chars().last().unwrap_or('\n');
+                    if prev == '\n' || prev == ' ' || prev == '\t' {
+                        // Comment — skip to end of line
+                        while let Some(c) = self.peek_char() {
+                            if c == '\n' {
+                                break;
+                            }
+                            self.advance_char();
+                        }
+                    } else {
+                        self.advance_char();
+                        value.push('#');
+                    }
                 }
                 Some(c) => {
                     self.advance_char();
