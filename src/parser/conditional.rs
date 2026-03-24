@@ -55,10 +55,14 @@ impl Parser {
     fn parse_cond_primary(&mut self) -> Result<Node> {
         let tok = self.lexer.peek_token()?;
 
-        // Handle ! (negation) — Parable drops the negation
+        // Handle ! (negation) — Parable drops it in S-expression output,
+        // but we keep it in the AST so the reformatter can preserve it.
         if tok.kind == TokenType::Bang {
             self.lexer.next_token()?;
-            return self.parse_cond_primary();
+            let inner = self.parse_cond_primary()?;
+            return Ok(Node::CondNot {
+                operand: Box::new(inner),
+            });
         }
 
         // Handle ( grouped expression )

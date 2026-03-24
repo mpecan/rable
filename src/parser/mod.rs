@@ -55,7 +55,7 @@ impl Parser {
 
         while !self.at_end()? {
             let prev_pos = self.lexer.pos();
-            let mut node = self.parse_list()?;
+            let mut node = self.parse_top_level_list()?;
             self.skip_newlines()?;
             fill_heredoc_contents(&mut node, &mut self.lexer);
             nodes.push(node);
@@ -65,6 +65,42 @@ impl Parser {
         }
 
         Ok(nodes)
+    }
+
+    /// Like `parse_list` but stops at newlines — used only at the top level
+    /// so that newline-separated commands become separate nodes.
+    fn parse_top_level_list(&mut self) -> Result<Node> {
+        self.enter()?;
+        let mut left = self.parse_background()?;
+
+        loop {
+            if self.at_end()? {
+                break;
+            }
+            let prev_pos = self.lexer.pos();
+            let tok = self.lexer.peek_token()?;
+            match tok.kind {
+                TokenType::Semi => {
+                    self.lexer.next_token()?;
+                    self.skip_newlines()?;
+                    if self.at_end()? || self.is_list_terminator()? {
+                        break;
+                    }
+                    // Check if next token is a newline (already skipped)
+                    let right = self.parse_background()?;
+                    left = Node::List {
+                        parts: vec![left, Node::Operator { op: ";".into() }, right],
+                    };
+                }
+                _ => break,
+            }
+            if self.lexer.pos() == prev_pos {
+                break;
+            }
+        }
+
+        self.leave();
+        Ok(left)
     }
 
     pub(super) fn at_end(&mut self) -> Result<bool> {
@@ -311,6 +347,15 @@ impl Parser {
             TokenType::Function => self.parse_function(),
             TokenType::Coproc => self.parse_coproc(),
             TokenType::DoubleLeftBracket => self.parse_cond_command(),
+            // Closing reserved words that cannot start a command
+            TokenType::Fi | TokenType::Done | TokenType::Esac => {
+                let tok = self.lexer.peek_token()?;
+                Err(RableError::parse(
+                    format!("unexpected reserved word '{}'", tok.value),
+                    tok.pos,
+                    tok.line,
+                ))
+            }
             _ => self.parse_simple_command(),
         }
     }

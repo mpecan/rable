@@ -64,7 +64,8 @@ pub(super) fn add_stderr_redirect(node: Option<&mut Node>) -> bool {
     }
 }
 
-/// Creates a `(redirect ">&" 1)` node.
+/// Creates a `(redirect ">&" 1)` node for pipe-both (|&) expansion.
+/// fd=2 so the reformatter outputs `2>&1` (stderr dup to stdout).
 pub(super) fn make_stderr_redirect() -> Node {
     Node::Redirect {
         op: ">&".to_string(),
@@ -72,7 +73,7 @@ pub(super) fn make_stderr_redirect() -> Node {
             value: "1".to_string(),
             parts: Vec::new(),
         }),
-        fd: -1,
+        fd: 2,
     }
 }
 

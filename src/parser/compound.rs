@@ -371,8 +371,24 @@ impl Parser {
         self.lexer.set_command_start();
         if self.peek_is(TokenType::LeftParen)? {
             self.lexer.next_token()?;
-            self.expect(TokenType::RightParen)?;
-            self.lexer.set_command_start();
+            if self.peek_is(TokenType::RightParen)? {
+                // function f() { ... } — empty parens syntax
+                self.lexer.next_token()?;
+                self.lexer.set_command_start();
+            } else {
+                // function f ( cmd ) — subshell body
+                self.skip_newlines()?;
+                let body = self.parse_list()?;
+                self.expect(TokenType::RightParen)?;
+                let redirects = self.parse_trailing_redirects()?;
+                return Ok(Node::Function {
+                    name,
+                    body: Box::new(Node::Subshell {
+                        body: Box::new(body),
+                        redirects,
+                    }),
+                });
+            }
         }
 
         self.skip_newlines()?;

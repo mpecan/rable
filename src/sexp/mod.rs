@@ -196,7 +196,31 @@ impl fmt::Display for Node {
                 } else {
                     value
                 };
-                write!(f, "(cond-term \"{val}\")")
+                // Process cmdsubs within the value (for redirect normalization)
+                // but write other content raw (no escaping — cond-terms use raw values)
+                if val.contains("$(") {
+                    write!(f, "(cond-term \"")?;
+                    let segments = word::parse_word_segments(val);
+                    for seg in &segments {
+                        match seg {
+                            word::WordSegment::Literal(text) => write!(f, "{text}")?,
+                            word::WordSegment::CommandSubstitution(content) => {
+                                write!(f, "$(")?;
+                                if let Some(reformatted) = crate::format::reformat_bash(content) {
+                                    write!(f, "{reformatted}")?;
+                                } else {
+                                    let normalized = normalize_cmdsub_content(content);
+                                    write!(f, "{normalized}")?;
+                                }
+                                write!(f, ")")?;
+                            }
+                            _ => write!(f, "{seg:?}")?,
+                        }
+                    }
+                    write!(f, "\")")
+                } else {
+                    write!(f, "(cond-term \"{val}\")")
+                }
             }
             Self::UnaryTest { op, operand } => {
                 write!(f, "(cond-unary \"{op}\" {operand})")
@@ -206,7 +230,8 @@ impl fmt::Display for Node {
             }
             Self::CondAnd { left, right } => write!(f, "(cond-and {left} {right})"),
             Self::CondOr { left, right } => write!(f, "(cond-or {left} {right})"),
-            Self::CondNot { operand } => write!(f, "(cond-not {operand})"),
+            // Parable drops negation in S-expression output — unwrap CondNot
+            Self::CondNot { operand } => write!(f, "{operand}"),
             Self::CondParen { inner } => write!(f, "(cond-expr {inner})"),
 
             // Other
@@ -246,23 +271,52 @@ impl fmt::Display for CasePattern {
 // Old write_word_value replaced by word::write_word_value (segment-based)
 
 /// Extracts content from matched parentheses (for command substitution).
+/// Case-aware: `)` in case patterns doesn't close the substitution.
+#[allow(clippy::too_many_lines)]
 pub(super) fn extract_paren_content(chars: &[char], pos: &mut usize) -> String {
     let mut content = String::new();
     let mut depth = 1;
+    let mut case_depth = 0usize;
+    let mut in_case_pattern = false;
+    let mut word_buf = String::new();
+
     while *pos < chars.len() {
         let c = chars[*pos];
-        if c == '(' {
-            depth += 1;
+        // Handle backslash-escaped characters
+        if c == '\\' && *pos + 1 < chars.len() {
+            word_buf.clear();
             content.push(c);
-        } else if c == ')' {
-            depth -= 1;
-            if depth == 0 {
-                *pos += 1;
-                return content;
+            *pos += 1;
+            content.push(chars[*pos]);
+            *pos += 1;
+            continue;
+        }
+        if c == '(' {
+            check_case_kw(&word_buf, &mut case_depth, &mut in_case_pattern);
+            word_buf.clear();
+            // In case pattern mode, `(` is optional pattern prefix — don't increment depth
+            if !(case_depth > 0 && in_case_pattern) {
+                depth += 1;
             }
             content.push(c);
+        } else if c == ')' {
+            check_case_kw(&word_buf, &mut case_depth, &mut in_case_pattern);
+            word_buf.clear();
+            if case_depth > 0 && in_case_pattern {
+                // Case pattern terminator — don't close
+                content.push(c);
+                in_case_pattern = false;
+            } else {
+                depth -= 1;
+                if depth == 0 {
+                    *pos += 1;
+                    return content;
+                }
+                content.push(c);
+            }
         } else if c == '\'' {
-            // Single-quoted string — read until closing '
+            check_case_kw(&word_buf, &mut case_depth, &mut in_case_pattern);
+            word_buf.clear();
             content.push(c);
             *pos += 1;
             while *pos < chars.len() && chars[*pos] != '\'' {
@@ -273,6 +327,8 @@ pub(super) fn extract_paren_content(chars: &[char], pos: &mut usize) -> String {
                 content.push(chars[*pos]); // closing '
             }
         } else if c == '"' {
+            check_case_kw(&word_buf, &mut case_depth, &mut in_case_pattern);
+            word_buf.clear();
             content.push(c);
             *pos += 1;
             while *pos < chars.len() && chars[*pos] != '"' {
@@ -286,12 +342,52 @@ pub(super) fn extract_paren_content(chars: &[char], pos: &mut usize) -> String {
             if *pos < chars.len() {
                 content.push(chars[*pos]); // closing "
             }
+        } else if c == ';' {
+            check_case_kw(&word_buf, &mut case_depth, &mut in_case_pattern);
+            word_buf.clear();
+            content.push(c);
+            // Check for ;; ;& ;;& which resume case pattern mode
+            if case_depth > 0 && *pos + 1 < chars.len() {
+                if chars[*pos + 1] == ';' {
+                    *pos += 1;
+                    content.push(chars[*pos]);
+                    if *pos + 1 < chars.len() && chars[*pos + 1] == '&' {
+                        *pos += 1;
+                        content.push(chars[*pos]);
+                    }
+                    in_case_pattern = true;
+                } else if chars[*pos + 1] == '&' {
+                    *pos += 1;
+                    content.push(chars[*pos]);
+                    in_case_pattern = true;
+                }
+            }
+        } else if c == ' ' || c == '\t' || c == '\n' || c == '|' {
+            check_case_kw(&word_buf, &mut case_depth, &mut in_case_pattern);
+            word_buf.clear();
+            content.push(c);
         } else {
+            word_buf.push(c);
             content.push(c);
         }
         *pos += 1;
     }
     content
+}
+
+/// Checks case-related keywords for `extract_paren_content`.
+fn check_case_kw(word: &str, case_depth: &mut usize, in_pattern: &mut bool) {
+    match word {
+        "case" => *case_depth += 1,
+        "in" if *case_depth > 0 => *in_pattern = true,
+        "esac" if *case_depth > 0 => {
+            *case_depth -= 1;
+            if *case_depth == 0 {
+                *in_pattern = false;
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Normalizes command substitution content:
@@ -646,6 +742,11 @@ fn write_redirect(f: &mut fmt::Formatter<'_>, op: &str, target: &Node, _fd: i32)
             let mut pos = 2; // skip $'
             let processed = process_ansi_c_content(&chars, &mut pos);
             write!(f, "\"'{processed}'\")")
+        } else if value.starts_with("<(") || value.starts_with(">(") {
+            // Process substitution in redirect target: use word value processing
+            write!(f, "\"")?;
+            word::write_word_value(f, value)?;
+            write!(f, "\")")
         } else {
             write!(f, "\"{value}\")")
         }

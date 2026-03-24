@@ -41,16 +41,24 @@ pub fn reformat_bash(source: &str) -> Option<String> {
     }
     let _guard = DepthGuard::enter()?;
 
-    let has_compound = source.contains("if ")
+    let needs_reformat = source.contains("if ")
         || source.contains("while ")
         || source.contains("until ")
         || source.contains("for ")
         || source.contains("case ")
         || source.contains("function ")
         || source.contains("() ")
-        || source.contains(" | ")
-        || source.contains("|&");
-    if !has_compound {
+        || source.contains('|')
+        || source.contains("<<")
+        || source.contains(">&")
+        || source.contains("<&")
+        || source.contains("$\"")
+        || source.contains("[[")
+        || source.contains("! ")
+        || source.contains('>')
+        || source.contains('<')
+        || has_leading_paren(source);
+    if !needs_reformat {
         return None;
     }
 
@@ -61,7 +69,7 @@ pub fn reformat_bash(source: &str) -> Option<String> {
     let mut out = String::new();
     for (i, node) in nodes.iter().enumerate() {
         if i > 0 {
-            out.push_str("; ");
+            out.push('\n');
         }
         format_node(node, &mut out, 0);
     }
@@ -85,11 +93,17 @@ fn format_node(node: &Node, out: &mut String, indent: usize) {
             ..
         } => format_if(condition, then_body, else_body.as_deref(), out, indent),
         Node::While {
-            condition, body, ..
-        } => format_while_until("while", condition, body, out, indent),
+            condition,
+            body,
+            redirects,
+            ..
+        } => format_while_until("while", condition, body, redirects, out, indent),
         Node::Until {
-            condition, body, ..
-        } => format_while_until("until", condition, body, out, indent),
+            condition,
+            body,
+            redirects,
+            ..
+        } => format_while_until("until", condition, body, redirects, out, indent),
         Node::For {
             var, words, body, ..
         } => format_for(var, words.as_deref(), body, out, indent),
@@ -115,22 +129,39 @@ fn format_node(node: &Node, out: &mut String, indent: usize) {
             indent_str(out, indent);
             out.push_str("done");
         }
-        Node::Case { word, patterns, .. } => format_case(word, patterns, out, indent),
+        Node::Case {
+            word,
+            patterns,
+            redirects,
+            ..
+        } => format_case(word, patterns, redirects, out, indent),
         Node::Function { name, body } => {
             out.push_str("function ");
             out.push_str(name);
             out.push_str(" () \n");
             format_function_body(body, out, indent);
         }
-        Node::Subshell { body, .. } => {
+        Node::Subshell {
+            body, redirects, ..
+        } => {
             out.push_str("( ");
             format_node(body, out, indent);
             out.push_str(" )");
+            for r in redirects {
+                out.push(' ');
+                format_redirect(r, out);
+            }
         }
-        Node::BraceGroup { body, .. } => {
+        Node::BraceGroup {
+            body, redirects, ..
+        } => {
             out.push_str("{ ");
             format_node(body, out, indent);
             out.push_str("; }");
+            for r in redirects {
+                out.push(' ');
+                format_redirect(r, out);
+            }
         }
         Node::Negation { pipeline } => {
             out.push_str("! ");
@@ -170,13 +201,16 @@ fn format_command(words: &[Node], redirects: &[Node], out: &mut String) {
             out.push(' ');
         }
         if let Node::Word { value, .. } = w {
-            out.push_str(value);
+            // Strip $"..." locale prefix → "..."
+            out.push_str(&strip_locale_prefix(value));
         } else {
             out.push_str(&w.to_string());
         }
     }
-    for r in redirects {
-        out.push(' ');
+    for (i, r) in redirects.iter().enumerate() {
+        if !words.is_empty() || i > 0 {
+            out.push(' ');
+        }
         format_redirect(r, out);
     }
 }
@@ -187,7 +221,11 @@ fn format_redirect(node: &Node, out: &mut String) {
             out.push_str(&fd.to_string());
         }
         out.push_str(op);
-        out.push(' ');
+        // Dup redirects (>&, <&) don't need a space before target
+        let is_dup = op == ">&" || op == "<&";
+        if !is_dup {
+            out.push(' ');
+        }
         if let Node::Word { value, .. } = target.as_ref() {
             out.push_str(value);
         }
@@ -272,10 +310,12 @@ fn format_if(
     out.push_str("fi");
 }
 
+#[allow(clippy::too_many_arguments)]
 fn format_while_until(
     keyword: &str,
     condition: &Node,
     body: &Node,
+    redirects: &[Node],
     out: &mut String,
     indent: usize,
 ) {
@@ -288,6 +328,10 @@ fn format_while_until(
     out.push_str(";\n");
     indent_str(out, indent);
     out.push_str("done");
+    for r in redirects {
+        out.push(' ');
+        format_redirect(r, out);
+    }
 }
 
 fn format_for(var: &str, words: Option<&[Node]>, body: &Node, out: &mut String, indent: usize) {
@@ -302,7 +346,9 @@ fn format_for(var: &str, words: Option<&[Node]>, body: &Node, out: &mut String, 
             }
         }
     }
-    out.push_str(";\ndo\n");
+    out.push_str(";\n");
+    indent_str(out, indent);
+    out.push_str("do\n");
     indent_str(out, indent + 4);
     format_node(body, out, indent + 4);
     out.push_str(";\n");
@@ -310,7 +356,13 @@ fn format_for(var: &str, words: Option<&[Node]>, body: &Node, out: &mut String, 
     out.push_str("done");
 }
 
-fn format_case(word: &Node, patterns: &[CasePattern], out: &mut String, indent: usize) {
+fn format_case(
+    word: &Node,
+    patterns: &[CasePattern],
+    redirects: &[Node],
+    out: &mut String,
+    indent: usize,
+) {
     out.push_str("case ");
     if let Node::Word { value, .. } = word {
         out.push_str(value);
@@ -336,11 +388,15 @@ fn format_case(word: &Node, patterns: &[CasePattern], out: &mut String, indent: 
         }
         out.push('\n');
         indent_str(out, indent + 4);
-        out.push_str(";;");
+        out.push_str(&p.terminator);
     }
     out.push('\n');
     indent_str(out, indent);
     out.push_str("esac");
+    for r in redirects {
+        out.push(' ');
+        format_redirect(r, out);
+    }
 }
 
 fn format_function_body(body: &Node, out: &mut String, indent: usize) {
@@ -403,4 +459,25 @@ fn indent_str(out: &mut String, n: usize) {
     for _ in 0..n {
         out.push(' ');
     }
+}
+
+/// Check if source starts with `(` (subshell/grouping).
+fn has_leading_paren(source: &str) -> bool {
+    source.trim_start().starts_with('(')
+}
+
+/// Strip `$"..."` locale prefix from word values, turning them into `"..."`.
+fn strip_locale_prefix(value: &str) -> String {
+    let mut result = String::with_capacity(value.len());
+    let chars: Vec<char> = value.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '$' && i + 1 < chars.len() && chars[i + 1] == '"' {
+            // Skip the $ prefix
+        } else {
+            result.push(chars[i]);
+        }
+        i += 1;
+    }
+    result
 }

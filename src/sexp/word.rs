@@ -24,6 +24,8 @@ pub enum WordSegment {
     LocaleString(String),
     /// Command substitution `$(...)` — content is between the parens.
     CommandSubstitution(String),
+    /// Process substitution `>(...)` or `<(...)` — direction + content.
+    ProcessSubstitution(char, String),
 }
 
 /// Parses a word's raw value into typed segments.
@@ -67,6 +69,16 @@ pub fn parse_word_segments(value: &str) -> Vec<WordSegment> {
                     i += 1;
                 }
             }
+        } else if (chars[i] == '>' || chars[i] == '<')
+            && !prev_backslash
+            && i + 1 < chars.len()
+            && chars[i + 1] == '('
+        {
+            let direction = chars[i];
+            flush_literal(&mut literal, &mut segments);
+            i += 2; // skip >( or <(
+            let content = extract_paren_content(&chars, &mut i);
+            segments.push(WordSegment::ProcessSubstitution(direction, content));
         } else {
             literal.push(chars[i]);
             i += 1;
@@ -103,6 +115,28 @@ pub fn write_word_segments(f: &mut fmt::Formatter<'_>, segments: &[WordSegment])
             WordSegment::CommandSubstitution(content) => {
                 write!(f, "$(")?;
                 if let Some(reformatted) = format::reformat_bash(content) {
+                    // Add space if content starts with ( to avoid $((
+                    if reformatted.starts_with('(') {
+                        write!(f, " ")?;
+                    }
+                    write_escaped_word(f, &reformatted)?;
+                } else {
+                    let normalized = normalize_cmdsub_content(content);
+                    // Add space if content starts with ( to avoid $((
+                    if normalized.starts_with('(') {
+                        write!(f, " ")?;
+                    }
+                    write_escaped_word(f, &normalized)?;
+                }
+                write!(f, ")")?;
+            }
+            WordSegment::ProcessSubstitution(direction, content) => {
+                write!(f, "{direction}(")?;
+                let trimmed = content.trim();
+                // Don't reformat content that starts with ( (subshell inside procsub)
+                if trimmed.starts_with('(') {
+                    write_escaped_word(f, trimmed)?;
+                } else if let Some(reformatted) = format::reformat_bash(content) {
                     write_escaped_word(f, &reformatted)?;
                 } else {
                     let normalized = normalize_cmdsub_content(content);
@@ -117,8 +151,139 @@ pub fn write_word_segments(f: &mut fmt::Formatter<'_>, segments: &[WordSegment])
 
 /// The public entry point — replaces the old monolithic `write_word_value`.
 pub fn write_word_value(f: &mut fmt::Formatter<'_>, value: &str) -> fmt::Result {
+    // Check for array assignment pattern: name=(...) — normalize content
+    if let Some(normalized) = try_normalize_array(value) {
+        // Process word segments so $() inside arrays gets reformatted
+        let segments = parse_word_segments(&normalized);
+        return write_word_segments(f, &segments);
+    }
     let segments = parse_word_segments(value);
     write_word_segments(f, &segments)
+}
+
+/// Detects `name=(...)` array patterns and normalizes whitespace/comments.
+fn try_normalize_array(value: &str) -> Option<String> {
+    // Find the `=(` pattern
+    let eq_paren = value.find("=(")?;
+    let prefix = &value[..=eq_paren]; // includes `=`
+    let rest = &value[eq_paren + 1..]; // starts with `(`
+
+    // Must start with `(` and end with `)`
+    if !rest.starts_with('(') || !rest.ends_with(')') {
+        return None;
+    }
+
+    // Only normalize if content has whitespace/comments that need it
+    let inner = &rest[1..rest.len() - 1];
+    if !inner.contains('\n') && !inner.contains('\t') && !inner.contains('#') {
+        return None;
+    }
+
+    let normalized = normalize_array_content(inner);
+    // Process command substitutions inside the array
+    let result = format!("{prefix}({normalized})");
+    // Now process word segments on the result to handle $() inside arrays
+    Some(result)
+}
+
+/// Normalizes array content: collapses whitespace, strips comments.
+#[allow(clippy::too_many_lines)]
+fn normalize_array_content(inner: &str) -> String {
+    let mut elements = Vec::new();
+    let chars: Vec<char> = inner.chars().collect();
+    let mut i = 0;
+    let mut current = String::new();
+
+    while i < chars.len() {
+        match chars[i] {
+            ' ' | '\t' | '\n' | '\r' => {
+                if !current.is_empty() {
+                    elements.push(std::mem::take(&mut current));
+                }
+                i += 1;
+            }
+            '#' => {
+                // Skip comment until end of line
+                if !current.is_empty() {
+                    elements.push(std::mem::take(&mut current));
+                }
+                while i < chars.len() && chars[i] != '\n' {
+                    i += 1;
+                }
+            }
+            '\'' => {
+                // Single-quoted string
+                current.push(chars[i]);
+                i += 1;
+                while i < chars.len() && chars[i] != '\'' {
+                    current.push(chars[i]);
+                    i += 1;
+                }
+                if i < chars.len() {
+                    current.push(chars[i]);
+                    i += 1;
+                }
+            }
+            '"' => {
+                // Double-quoted string
+                current.push(chars[i]);
+                i += 1;
+                while i < chars.len() && chars[i] != '"' {
+                    current.push(chars[i]);
+                    if chars[i] == '\\' && i + 1 < chars.len() {
+                        i += 1;
+                        current.push(chars[i]);
+                    }
+                    i += 1;
+                }
+                if i < chars.len() {
+                    current.push(chars[i]);
+                    i += 1;
+                }
+            }
+            '$' if i + 1 < chars.len() && chars[i + 1] == '(' => {
+                // Command substitution — read matched parens
+                current.push(chars[i]);
+                current.push(chars[i + 1]);
+                i += 2;
+                let mut depth = 1;
+                while i < chars.len() && depth > 0 {
+                    if chars[i] == '(' {
+                        depth += 1;
+                    } else if chars[i] == ')' {
+                        depth -= 1;
+                    }
+                    current.push(chars[i]);
+                    i += 1;
+                }
+            }
+            '$' if i + 1 < chars.len() && chars[i + 1] == '{' => {
+                // Parameter expansion — read matched braces
+                current.push(chars[i]);
+                current.push(chars[i + 1]);
+                i += 2;
+                let mut depth = 1;
+                while i < chars.len() && depth > 0 {
+                    if chars[i] == '{' {
+                        depth += 1;
+                    } else if chars[i] == '}' {
+                        depth -= 1;
+                    }
+                    current.push(chars[i]);
+                    i += 1;
+                }
+            }
+            _ => {
+                current.push(chars[i]);
+                i += 1;
+            }
+        }
+    }
+    if !current.is_empty() {
+        elements.push(current);
+    }
+
+    elements.join(" ")
 }
 
 // -- helpers --
