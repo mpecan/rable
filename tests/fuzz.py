@@ -35,13 +35,13 @@ def run_oracle(source, extglob=False):
     """Run bash-oracle on input, return S-expression output or None on error."""
     if not HAS_ORACLE:
         return None
-    cmd = [BASH_ORACLE]
+    cmd = [BASH_ORACLE, "--dump-ast"]
     if extglob:
-        cmd.append("--extglob")
-    cmd.extend(["-e", source])
+        cmd.append("-O")
+        cmd.append("extglob")
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=5
+            cmd, input=source, capture_output=True, text=True, timeout=5
         )
         if result.returncode != 0:
             return "<error>"
