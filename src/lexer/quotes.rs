@@ -77,7 +77,14 @@ impl Lexer {
                     }
                 }
                 Some('$') => {
-                    self.read_dollar(value)?;
+                    // Inside double quotes, $" is NOT a locale string — it's
+                    // bare $ followed by closing ". Don't let read_dollar consume it.
+                    if self.input.get(self.pos + 1) == Some(&'"') {
+                        self.advance_char();
+                        value.push('$');
+                    } else {
+                        self.read_dollar(value)?;
+                    }
                 }
                 Some('`') => {
                     self.advance_char();
