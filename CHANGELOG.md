@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/mpecan/rable/compare/rable-v0.1.2...rable-v0.1.3) (2026-03-24)
+
+
+### Bug Fixes
+
+* sync pyproject.toml version to 0.1.1 and fix release-please config ([5efe677](https://github.com/mpecan/rable/commit/5efe6778bcec782479a1f13eec283872497b6e02))
+
 ## [0.1.2](https://github.com/mpecan/rable/compare/rable-v0.1.1...rable-v0.1.2) (2026-03-24)
 
 
