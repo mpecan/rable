@@ -2,6 +2,7 @@ use super::Lexer;
 
 /// Pending here-document to be read after the current line.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct PendingHereDoc {
     pub delimiter: String,
     pub strip_tabs: bool,

@@ -19,6 +19,27 @@ pub enum RableError {
 }
 
 impl RableError {
+    /// Returns the line number where the error occurred (1-based).
+    pub const fn line(&self) -> usize {
+        match self {
+            Self::Parse { line, .. } | Self::MatchedPair { line, .. } => *line,
+        }
+    }
+
+    /// Returns the character position where the error occurred (0-based).
+    pub const fn pos(&self) -> usize {
+        match self {
+            Self::Parse { pos, .. } | Self::MatchedPair { pos, .. } => *pos,
+        }
+    }
+
+    /// Returns the error message.
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Parse { message, .. } | Self::MatchedPair { message, .. } => message,
+        }
+    }
+
     pub fn parse(message: impl Into<String>, pos: usize, line: usize) -> Self {
         Self::Parse {
             message: message.into(),

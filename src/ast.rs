@@ -2,7 +2,7 @@
 ///
 /// This enum mirrors Parable's AST node classes exactly, ensuring
 /// S-expression output compatibility.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[allow(clippy::use_self)]
 pub enum Node {
     /// A word token, possibly containing expansion parts.
@@ -274,7 +274,7 @@ pub enum Node {
 }
 
 /// A single case pattern clause within a `case` statement.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CasePattern {
     pub patterns: Vec<Node>,
     pub body: Option<Node>,

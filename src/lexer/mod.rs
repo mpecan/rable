@@ -22,11 +22,11 @@ pub struct LexerConfig {
 /// Mutable context flags the parser uses to inform the lexer.
 /// Private — the parser interacts via methods on `Lexer`.
 #[derive(Debug, Clone)]
-pub(crate) struct LexerContext {
+pub struct LexerContext {
     /// At command start position — reserved words are recognized.
-    pub(crate) command_start: bool,
+    pub command_start: bool,
     /// Inside a `[[ ]]` conditional expression.
-    pub(crate) cond_expr: bool,
+    pub cond_expr: bool,
 }
 
 impl Default for LexerContext {

@@ -1,28 +1,115 @@
+//! # Rable — A complete GNU Bash 5.3-compatible parser
+//!
+//! Rable parses bash source code into an abstract syntax tree (AST) of [`Node`]
+//! values. Each node can be formatted as an S-expression via its [`Display`]
+//! implementation, producing output identical to [Parable](https://github.com/ldayton/Parable).
+//!
+//! # Quick Start
+//!
+//! ```
+//! use rable::{parse, Node};
+//!
+//! let nodes = parse("echo hello | grep h", false).unwrap();
+//! assert_eq!(nodes.len(), 1);
+//!
+//! // S-expression output via Display
+//! let sexp = nodes[0].to_string();
+//! assert!(sexp.contains("pipe"));
+//! ```
+//!
+//! # Parsing Options
+//!
+//! The `extglob` parameter enables extended glob patterns (`@()`, `?()`, `*()`,
+//! `+()`, `!()`). Set to `false` for standard bash parsing.
+//!
+//! ```
+//! // Standard parsing
+//! let nodes = rable::parse("echo hello", false).unwrap();
+//!
+//! // With extended globs
+//! let nodes = rable::parse("echo @(foo|bar)", true).unwrap();
+//! ```
+//!
+//! # Error Handling
+//!
+//! Parse errors include line and position information:
+//!
+//! ```
+//! match rable::parse("if", false) {
+//!     Ok(_) => unreachable!(),
+//!     Err(e) => {
+//!         assert_eq!(e.line(), 1);
+//!         println!("Error: {e}");
+//!     }
+//! }
+//! ```
+//!
+//! # Working with the AST
+//!
+//! The AST uses a single [`Node`] enum with variants for all bash constructs.
+//! Pattern matching is the primary way to inspect nodes:
+//!
+//! ```
+//! use rable::{parse, Node};
+//!
+//! let nodes = parse("echo hello world", false).unwrap();
+//! match &nodes[0] {
+//!     Node::Command { words, redirects } => {
+//!         assert_eq!(words.len(), 3); // echo, hello, world
+//!         assert!(redirects.is_empty());
+//!     }
+//!     _ => panic!("expected Command"),
+//! }
+//! ```
+
 pub mod ast;
-pub mod context;
 pub mod error;
-pub mod format;
-pub mod lexer;
-pub mod parser;
-pub mod sexp;
 pub mod token;
+
+// Public for advanced use (S-expression formatting)
+pub mod sexp;
+
+// Implementation details — not part of the stable API
+pub(crate) mod context;
+pub(crate) mod format;
+pub(crate) mod lexer;
+pub(crate) mod parser;
 
 #[cfg(feature = "python")]
 mod python;
 
-use error::Result;
+// Convenient re-exports
+pub use ast::{CasePattern, Node};
+pub use error::{RableError, Result};
+pub use token::{Token, TokenType};
 
-/// Parses a bash source string into a list of AST nodes.
+/// Parses a bash source string into a list of top-level AST nodes.
 ///
-/// This is the main entry point for the parser. The returned nodes
-/// can be formatted as S-expressions using their `Display` implementation,
-/// producing output compatible with Parable.
+/// Each top-level command separated by newlines becomes a separate node.
+/// Commands separated by `;` on the same line are grouped into a single
+/// [`Node::List`].
+///
+/// Set `extglob` to `true` to enable extended glob patterns (`@()`, `?()`,
+/// `*()`, `+()`, `!()`).
+///
+/// # Examples
+///
+/// ```
+/// let nodes = rable::parse("echo hello", false).unwrap();
+/// assert_eq!(nodes[0].to_string(), "(command (word \"echo\") (word \"hello\"))");
+/// ```
+///
+/// ```
+/// // Multiple top-level commands
+/// let nodes = rable::parse("echo a\necho b", false).unwrap();
+/// assert_eq!(nodes.len(), 2);
+/// ```
 ///
 /// # Errors
 ///
-/// Returns `RableError::Parse` for syntax errors and
-/// `RableError::MatchedPair` for unclosed delimiters.
-pub fn parse(source: &str, extglob: bool) -> Result<Vec<ast::Node>> {
+/// Returns [`RableError::Parse`] for syntax errors and
+/// [`RableError::MatchedPair`] for unclosed delimiters.
+pub fn parse(source: &str, extglob: bool) -> Result<Vec<Node>> {
     let lexer = lexer::Lexer::new(source, extglob);
     let mut parser = parser::Parser::new(lexer);
     parser.parse_all()
