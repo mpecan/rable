@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/mpecan/rable/compare/rable-v0.1.1...rable-v0.1.2) (2026-03-24)
+
+
+### Bug Fixes
+
+* **ci:** pin Python 3.13 for wheel builds ([f1f4609](https://github.com/mpecan/rable/commit/f1f4609a1aa64ad65322f9712b68e0ff65e3cb7f))
+
 ## [0.1.1](https://github.com/mpecan/rable/compare/rable-v0.1.0...rable-v0.1.1) (2026-03-24)
 
 
