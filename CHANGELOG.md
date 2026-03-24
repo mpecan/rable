@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.1.5](https://github.com/mpecan/rable/compare/rable-v0.1.4...rable-v0.1.5) (2026-03-24)
+
+
+### Features
+
+* add differential fuzzer for bash-oracle and Parable comparison ([4d18eff](https://github.com/mpecan/rable/commit/4d18effb0a75d7e87f5fdd44ed8d40560ee3b209))
+* bracket subscript tracking in lexer (112/181 oracle) ([35016dc](https://github.com/mpecan/rable/commit/35016dcb4f24abca68439f83252961b7e74e4ac7))
+* generate 186 oracle-derived tests from bash-oracle fuzzing ([e7940ce](https://github.com/mpecan/rable/commit/e7940ce55c4056fac648593ef62cbffd24a9a7cf))
+* process sub word continuation + continue_word helper (124/181) ([2caaf53](https://github.com/mpecan/rable/commit/2caaf53d0437b6886c3d47d087ce36018b695e56))
+
+
+### Bug Fixes
+
+* &&gt; and &&gt;&gt; redirects never accept fd number prefix (72/181) ([e93a6d4](https://github.com/mpecan/rable/commit/e93a6d4a7f6df4a58296367ad2730b4b6b0f36c9))
+* &gt;&- and &lt;&- close-fd as complete lexer operators (136/181) ([e5f4f0e](https://github.com/mpecan/rable/commit/e5f4f0ea00e5e0e38bdcbdec1309341809831538))
+* $\" inside double quotes is bare dollar, not locale string (165/181) ([a80b648](https://github.com/mpecan/rable/commit/a80b648763d1ef949ffaa886fa9fbb240cade236))
+* broaden reformatter gate + trim trailing spaces (94/181) ([06d2d93](https://github.com/mpecan/rable/commit/06d2d93441437ae7a64b20dcdbbf8e8bd44a5f8c))
+* cmdsub in redirect targets + close-fd formatting (131/181) ([2d5b8a8](https://github.com/mpecan/rable/commit/2d5b8a883c910da424ce33d69e4b9fa57b5cd48e))
+* escape backslashes in arithmetic S-expression output (64/181) ([3e1d41e](https://github.com/mpecan/rable/commit/3e1d41e216f286783727414cdf63006b7e9a25e5))
+* fd numbers only recognized adjacent to redirect operators (78/181) ([f5962e4](https://github.com/mpecan/rable/commit/f5962e440f4bfeb655ee15285f530752b83992ca))
+* high-byte ANSI-C replacement chars + locale double-quote gating (83/181) ([118cb81](https://github.com/mpecan/rable/commit/118cb81bafd91dbb736e5a5fd2546c09d98a1cb3))
+* improve ANSI-C processing and bash-oracle compat (60/181) ([dd28ade](https://github.com/mpecan/rable/commit/dd28ade754d847993654fe7e61ce385528d8ed06))
+* improve bash-oracle compatibility (37/181 oracle tests passing) ([d1c07fb](https://github.com/mpecan/rable/commit/d1c07fbe0f7f0b37b2e764a2b746424938f36646))
+* improve bash-oracle compatibility (48/181 oracle tests passing) ([2ee0ea1](https://github.com/mpecan/rable/commit/2ee0ea10b6486d83e67d3986024c6ef114012630))
+* pipeline time demoting, move-fd quoting, reserved words (144/181) ([27a9c94](https://github.com/mpecan/rable/commit/27a9c9422c127c2fce70d26bf2334a5aea04e161))
+* procsub word continuation + double-quote context gating (127/181) ([da0eba1](https://github.com/mpecan/rable/commit/da0eba1420f7f4677a1b161c60dda5b55dac6a94))
+* single-quoted regions opaque to word segment parser (160/181) ([a9ca786](https://github.com/mpecan/rable/commit/a9ca786674dc8059da9d3959a38d8f9793b660da))
+* time after | in pipelines treated as regular word (139/181) ([7e6b592](https://github.com/mpecan/rable/commit/7e6b59211ef4dd0ee3909b995fa46785d88dca6d))
+* update fuzzer to use --dump-ast flag for bash-oracle ([b335332](https://github.com/mpecan/rable/commit/b335332f93e007d57196f5af1eeef3b394482346))
+* varfd adjacency + digit-only varfd rejection (141/181) ([2ba8788](https://github.com/mpecan/rable/commit/2ba87882df404abb102bdfedc077bd671c3b94cd))
+
+
+### Code Refactoring
+
+* centralize quote skipping and balanced delimiter reading ([dc312ca](https://github.com/mpecan/rable/commit/dc312ca38bb7b73a02a61bde4be597fbf45dcd6b))
+* eliminate code duplication from cargo-dupes audit ([974a894](https://github.com/mpecan/rable/commit/974a894d7bef5ad3aa1ba46c0deed87ad112932a))
+* extract shared CaseTracker and is_backslash_escaped ([3d774e1](https://github.com/mpecan/rable/commit/3d774e1446a7b356be5a5134c97cd7488435a7fc))
+* Token::adjacent_to + depth guard increase to 2 ([1b1824d](https://github.com/mpecan/rable/commit/1b1824d7f136c01586343214db5217811905e6e6))
+* unify process_word_value with parse_word_segments (149/181) ([816161b](https://github.com/mpecan/rable/commit/816161b93cb5cfa5dd448779b77db3c691abd53a))
+* unify redirect word processing, eliminate feature envy (154/181) ([b520411](https://github.com/mpecan/rable/commit/b5204116e68d1762611de8633c9a736c7009ccdc))
+
 ## [0.1.4](https://github.com/mpecan/rable/compare/rable-v0.1.3...rable-v0.1.4) (2026-03-24)
 
 
