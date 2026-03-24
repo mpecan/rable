@@ -473,7 +473,7 @@ impl Parser {
                         && !self.is_and_redirect()?
                     {
                         redirects.push(self.parse_redirect_with_fd(&tok)?);
-                    } else if is_varfd(&tok.value) && self.is_redirect_operator()? {
+                    } else if adjacent && is_varfd(&tok.value) && self.is_redirect_operator()? {
                         redirects.push(self.parse_redirect()?);
                     } else {
                         if words.is_empty() && self.peek_is(TokenType::LeftParen)? {

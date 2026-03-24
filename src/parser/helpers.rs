@@ -30,6 +30,8 @@ pub(super) fn is_varfd(s: &str) -> bool {
         && s[1..s.len() - 1]
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        // Must contain at least one letter (not just digits — {4} is not a varfd)
+        && s[1..s.len() - 1].chars().any(|c| c.is_ascii_alphabetic() || c == '_')
 }
 
 /// Returns true if the string is a conditional binary operator.
