@@ -18,7 +18,8 @@ impl DepthGuard {
     fn enter() -> Option<Self> {
         REFORMAT_DEPTH.with(|d| {
             let v = d.get();
-            if v > 0 {
+            // Allow up to depth 2 for nested command substitutions
+            if v >= 2 {
                 return None;
             }
             d.set(v + 1);

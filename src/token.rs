@@ -160,6 +160,11 @@ impl Token {
         }
     }
 
+    /// Returns true if this token is immediately adjacent to `other` (no whitespace).
+    pub const fn adjacent_to(&self, other: &Self) -> bool {
+        self.pos + self.value.len() == other.pos
+    }
+
     pub const fn eof(pos: usize, line: usize) -> Self {
         Self {
             kind: TokenType::Eof,
