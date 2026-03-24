@@ -12,11 +12,11 @@ use super::{
 impl Parser {
     pub(super) fn parse_cond_command(&mut self) -> Result<Node> {
         self.expect(TokenType::DoubleLeftBracket)?;
-        self.lexer.state.cond_expr = true;
+        self.lexer.enter_cond_expr();
 
         let body = self.parse_cond_or()?;
 
-        self.lexer.state.cond_expr = false;
+        self.lexer.leave_cond_expr();
         self.expect_cond_close()?;
         let redirects = self.parse_trailing_redirects()?;
 

@@ -12,27 +12,30 @@ mod tests;
 
 pub use heredoc::PendingHereDoc;
 
-/// Parser state flags that affect lexer behavior.
-///
-/// Bash tokenization is context-sensitive — the parser must inform the lexer
-/// about the current parsing context.
-#[derive(Debug, Clone, Default)]
-#[allow(clippy::struct_excessive_bools)]
-pub struct ParserStateFlags {
-    /// Inside a case pattern.
-    pub case_pattern: bool,
-    /// Inside a command substitution.
-    pub command_subst: bool,
-    /// Inside a conditional expression `[[ ]]`.
-    pub cond_expr: bool,
-    /// Inside an arithmetic expression.
-    pub arith: bool,
-    /// Assignment words are allowed in this position.
-    pub assign_ok: bool,
-    /// We are at the start of a command (reserved words are recognized).
-    pub command_start: bool,
-    /// Extglob is enabled.
+/// Immutable lexer configuration set at construction time.
+#[derive(Debug, Clone, Copy)]
+pub struct LexerConfig {
+    /// Whether extended glob patterns `@()`, `?()`, `*()`, `+()`, `!()` are enabled.
     pub extglob: bool,
+}
+
+/// Mutable context flags the parser uses to inform the lexer.
+/// Private — the parser interacts via methods on `Lexer`.
+#[derive(Debug, Clone)]
+pub(crate) struct LexerContext {
+    /// At command start position — reserved words are recognized.
+    pub(crate) command_start: bool,
+    /// Inside a `[[ ]]` conditional expression.
+    pub(crate) cond_expr: bool,
+}
+
+impl Default for LexerContext {
+    fn default() -> Self {
+        Self {
+            command_start: true,
+            cond_expr: false,
+        }
+    }
 }
 
 /// Hand-written context-sensitive lexer for bash.
@@ -41,11 +44,36 @@ pub struct Lexer {
     pos: usize,
     line: usize,
     peeked: Option<Token>,
-    pub state: ParserStateFlags,
+    config: LexerConfig,
+    pub(crate) ctx: LexerContext,
     /// Pending here-documents to be read after the next newline.
     pub pending_heredocs: Vec<PendingHereDoc>,
     /// Completed here-document contents (filled after newline).
     pub heredoc_contents: Vec<String>,
+}
+
+impl Lexer {
+    // -- State API for parser --
+
+    /// Signal that the next word position is a command start.
+    pub const fn set_command_start(&mut self) {
+        self.ctx.command_start = true;
+    }
+
+    /// Signal entering a `[[ ]]` conditional expression context.
+    pub const fn enter_cond_expr(&mut self) {
+        self.ctx.cond_expr = true;
+    }
+
+    /// Signal leaving a `[[ ]]` conditional expression context.
+    pub const fn leave_cond_expr(&mut self) {
+        self.ctx.cond_expr = false;
+    }
+
+    /// Whether extended glob patterns are enabled.
+    pub const fn extglob(&self) -> bool {
+        self.config.extglob
+    }
 }
 
 impl Lexer {
@@ -55,11 +83,8 @@ impl Lexer {
             pos: 0,
             line: 1,
             peeked: None,
-            state: ParserStateFlags {
-                command_start: true,
-                extglob,
-                ..ParserStateFlags::default()
-            },
+            config: LexerConfig { extglob },
+            ctx: LexerContext::default(),
             pending_heredocs: Vec::new(),
             heredoc_contents: Vec::new(),
         }
@@ -193,7 +218,7 @@ impl Lexer {
         match ch {
             '\n' => {
                 self.advance_char();
-                self.state.command_start = true;
+                self.ctx.command_start = true;
                 // Read any pending here-documents after the newline
                 if !self.pending_heredocs.is_empty() {
                     self.read_pending_heredocs();

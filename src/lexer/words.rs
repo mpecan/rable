@@ -33,7 +33,7 @@ impl Lexer {
                         || value.ends_with('?')
                         || value.ends_with('+')
                         || value.ends_with('!')
-                        || (value.ends_with('*') && self.state.extglob)
+                        || (value.ends_with('*') && self.config.extglob)
                     {
                         // Extglob: @(...), ?(...), etc.
                         self.advance_char();
@@ -51,7 +51,7 @@ impl Lexer {
                     self.read_extglob(&mut value, c)?;
                 }
                 // * extglob only when extglob mode is enabled
-                '*' if self.input.get(self.pos + 1) == Some(&'(') && self.state.extglob => {
+                '*' if self.input.get(self.pos + 1) == Some(&'(') && self.config.extglob => {
                     self.read_extglob(&mut value, c)?;
                 }
                 // Regular character
@@ -67,7 +67,7 @@ impl Lexer {
         }
 
         // Check for reserved words at command start
-        let kind = if self.state.command_start {
+        let kind = if self.ctx.command_start {
             TokenType::reserved_word(&value).unwrap_or(TokenType::Word)
         } else {
             TokenType::Word
@@ -75,7 +75,7 @@ impl Lexer {
 
         // After a word, we're no longer at command start (unless it's a keyword
         // that expects another command)
-        self.state.command_start = kind.starts_command()
+        self.ctx.command_start = kind.starts_command()
             || matches!(
                 kind,
                 TokenType::Then
@@ -154,7 +154,7 @@ impl Lexer {
         value.push('(');
         // Read until matching )
         self.read_matched_parens(&mut value, 1)?;
-        self.state.command_start = false;
+        self.ctx.command_start = false;
         Ok(Token::new(TokenType::Word, value, start, line))
     }
 }

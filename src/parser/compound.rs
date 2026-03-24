@@ -80,7 +80,7 @@ impl Parser {
         self.expect(keyword)?;
         self.skip_newlines()?;
         let condition = self.parse_list()?;
-        self.lexer.state.command_start = true;
+        self.lexer.set_command_start();
         self.expect(TokenType::Do)?;
         self.skip_newlines()?;
         let body = self.parse_list()?;
@@ -115,7 +115,7 @@ impl Parser {
         let var_tok = self.lexer.next_token()?;
         let var = var_tok.value;
 
-        self.lexer.state.command_start = true;
+        self.lexer.set_command_start();
         self.skip_newlines()?;
         let words = if self.peek_is(TokenType::In)? {
             self.lexer.next_token()?;
@@ -146,7 +146,7 @@ impl Parser {
             self.lexer.next_token()?;
         }
         self.skip_newlines()?;
-        self.lexer.state.command_start = true;
+        self.lexer.set_command_start();
         let (body, redirects) = self.parse_loop_body()?;
 
         Ok(Node::For {
@@ -180,7 +180,7 @@ impl Parser {
             self.lexer.next_token()?;
         }
         self.skip_newlines()?;
-        self.lexer.state.command_start = true;
+        self.lexer.set_command_start();
         let (body, redirects) = self.parse_loop_body()?;
 
         Ok(Node::ForArith {
@@ -220,16 +220,16 @@ impl Parser {
             parts: Vec::new(),
         });
 
-        self.lexer.state.command_start = true;
+        self.lexer.set_command_start();
         self.skip_newlines()?;
         self.expect(TokenType::In)?;
         self.skip_newlines()?;
 
         let mut patterns = Vec::new();
-        self.lexer.state.command_start = true;
+        self.lexer.set_command_start();
         while !self.peek_is(TokenType::Esac)? && !self.at_end()? {
             patterns.push(self.parse_case_pattern()?);
-            self.lexer.state.command_start = true;
+            self.lexer.set_command_start();
             self.skip_newlines()?;
         }
 
@@ -297,7 +297,7 @@ impl Parser {
         let var_tok = self.lexer.next_token()?;
         let var = var_tok.value;
 
-        self.lexer.state.command_start = true;
+        self.lexer.set_command_start();
         self.skip_newlines()?;
 
         let words = if self.peek_is(TokenType::In)? {
@@ -326,7 +326,7 @@ impl Parser {
             self.lexer.next_token()?;
         }
         self.skip_newlines()?;
-        self.lexer.state.command_start = true;
+        self.lexer.set_command_start();
         let (body, redirects) = self.parse_loop_body()?;
 
         Ok(Node::Select {
@@ -368,11 +368,11 @@ impl Parser {
         let name_tok = self.lexer.next_token()?;
         let name = name_tok.value;
 
-        self.lexer.state.command_start = true;
+        self.lexer.set_command_start();
         if self.peek_is(TokenType::LeftParen)? {
             self.lexer.next_token()?;
             self.expect(TokenType::RightParen)?;
-            self.lexer.state.command_start = true;
+            self.lexer.set_command_start();
         }
 
         self.skip_newlines()?;
@@ -387,7 +387,7 @@ impl Parser {
     pub(super) fn parse_function_def(&mut self, name_tok: &Token) -> Result<Node> {
         self.expect(TokenType::LeftParen)?;
         self.expect(TokenType::RightParen)?;
-        self.lexer.state.command_start = true;
+        self.lexer.set_command_start();
         self.skip_newlines()?;
         let body = self.parse_command()?;
 
@@ -415,7 +415,7 @@ impl Parser {
         }
 
         let first_tok = self.lexer.next_token()?;
-        self.lexer.state.command_start = true;
+        self.lexer.set_command_start();
         let next = self.lexer.peek_token()?;
         let name = if next.kind.starts_command()
             && !matches!(
