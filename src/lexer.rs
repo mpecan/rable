@@ -89,16 +89,19 @@ impl Lexer {
             }
             // Read a line
             let mut line = String::new();
+            let mut prev_backslash = false;
             while let Some(c) = self.peek_char() {
                 self.advance_char();
                 if c == '\n' {
                     break;
                 }
-                // Line continuation in unquoted heredoc: \<newline> joins lines
-                if c == '\\' && self.peek_char() == Some('\n') {
-                    self.advance_char(); // skip the newline
-                    continue; // join with next line
+                // Line continuation: \<newline> joins lines (but not \\<newline>)
+                if c == '\\' && !prev_backslash && self.peek_char() == Some('\n') {
+                    self.advance_char();
+                    prev_backslash = false;
+                    continue;
                 }
+                prev_backslash = c == '\\' && !prev_backslash;
                 line.push(c);
             }
             // Check if this line matches the delimiter

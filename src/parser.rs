@@ -74,14 +74,14 @@ impl Parser {
         Ok(())
     }
 
-    /// Parses a command list (`;`, `\n`, `&` have lowest precedence).
+    /// Parses a command list. Precedence (low to high): `;`/`\n` < `&` < `&&`/`||` < `|`.
     ///
     /// # Errors
     ///
     /// Returns `RableError` on syntax errors or unclosed delimiters.
     pub fn parse_list(&mut self) -> Result<Node> {
         self.enter()?;
-        let mut left = self.parse_and_or()?;
+        let mut left = self.parse_background()?;
 
         loop {
             if self.at_end()? {
@@ -96,23 +96,9 @@ impl Parser {
                     if self.at_end()? || self.is_list_terminator()? {
                         break;
                     }
-                    let right = self.parse_and_or()?;
+                    let right = self.parse_background()?;
                     left = Node::List {
                         parts: vec![left, Node::Operator { op: ";".into() }, right],
-                    };
-                }
-                TokenType::Ampersand => {
-                    self.lexer.next_token()?;
-                    self.skip_newlines()?;
-                    if self.at_end()? || self.is_list_terminator()? {
-                        left = Node::List {
-                            parts: vec![left, Node::Operator { op: "&".into() }],
-                        };
-                        break;
-                    }
-                    let right = self.parse_and_or()?;
-                    left = Node::List {
-                        parts: vec![left, Node::Operator { op: "&".into() }, right],
                     };
                 }
                 _ => break,
@@ -126,7 +112,43 @@ impl Parser {
         Ok(left)
     }
 
-    /// Parses `&&` and `||` chains (higher precedence than `;`).
+    /// Parses `&` (background) — higher precedence than `;`, lower than `&&`/`||`.
+    fn parse_background(&mut self) -> Result<Node> {
+        let mut left = self.parse_and_or()?;
+
+        loop {
+            if self.at_end()? {
+                break;
+            }
+            if self.lexer.peek_token()?.kind != TokenType::Ampersand {
+                break;
+            }
+            self.lexer.next_token()?;
+            self.skip_newlines()?;
+            if self.at_end()? || self.is_list_terminator()? {
+                left = Node::List {
+                    parts: vec![left, Node::Operator { op: "&".into() }],
+                };
+                break;
+            }
+            // Check if next is ; or \n (back to parse_list level)
+            let peek = self.lexer.peek_token()?;
+            if matches!(peek.kind, TokenType::Semi | TokenType::Newline) {
+                left = Node::List {
+                    parts: vec![left, Node::Operator { op: "&".into() }],
+                };
+                break;
+            }
+            let right = self.parse_and_or()?;
+            left = Node::List {
+                parts: vec![left, Node::Operator { op: "&".into() }, right],
+            };
+        }
+
+        Ok(left)
+    }
+
+    /// Parses `&&` and `||` chains (higher precedence than `&`).
     fn parse_and_or(&mut self) -> Result<Node> {
         let mut left = self.parse_pipeline()?;
 
