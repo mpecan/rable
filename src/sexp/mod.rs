@@ -800,8 +800,8 @@ fn write_redirect(f: &mut fmt::Formatter<'_>, op: &str, target: &Node, _fd: i32)
             let mut pos = 2; // skip $'
             let processed = process_ansi_c_content(&chars, &mut pos);
             write!(f, "\"'{processed}'\")")
-        } else if value.starts_with("<(") || value.starts_with(">(") {
-            // Process substitution in redirect target: use word value processing
+        } else if value.starts_with("<(") || value.starts_with(">(") || value.contains("$'") {
+            // Process substitution or ANSI-C in redirect target: use word processing
             write!(f, "\"")?;
             word::write_word_value(f, value)?;
             write!(f, "\")")

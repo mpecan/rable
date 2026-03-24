@@ -36,8 +36,29 @@ pub fn parse_word_segments(value: &str) -> Vec<WordSegment> {
     let mut i = 0;
     let mut literal = String::new();
     let mut brace_depth = 0usize; // Track ${...} nesting
+    let mut in_double_quote = false; // Track "..." context
 
     while i < chars.len() {
+        // Count consecutive backslashes before current position
+        // Even count = not escaped, odd count = escaped
+        let prev_backslash = {
+            let mut count = 0;
+            let mut j = i;
+            while j > 0 && chars[j - 1] == '\\' {
+                count += 1;
+                j -= 1;
+            }
+            count % 2 != 0
+        };
+
+        // Track double-quote context (not inside ${...} where quotes nest differently)
+        if chars[i] == '"' && !prev_backslash && brace_depth == 0 {
+            in_double_quote = !in_double_quote;
+            literal.push(chars[i]);
+            i += 1;
+            continue;
+        }
+
         // Track closing braces for ${...}
         if chars[i] == '}' && brace_depth > 0 {
             brace_depth -= 1;
@@ -45,7 +66,6 @@ pub fn parse_word_segments(value: &str) -> Vec<WordSegment> {
             i += 1;
             continue;
         }
-        let prev_backslash = i > 0 && chars[i - 1] == '\\';
 
         // Backticks are opaque — don't process $'...' or $() inside them
         if chars[i] == '`' && !prev_backslash {
@@ -69,6 +89,13 @@ pub fn parse_word_segments(value: &str) -> Vec<WordSegment> {
         if chars[i] == '$' && !prev_backslash && i + 1 < chars.len() {
             match chars[i + 1] {
                 '\'' => {
+                    if in_double_quote && brace_depth == 0 {
+                        // $'...' is NOT special inside double quotes — literal
+                        // (but IS special inside ${...} even when double-quoted)
+                        literal.push(chars[i]);
+                        i += 1;
+                        continue;
+                    }
                     if brace_depth > 0 {
                         // ANSI-C inside ${...} — process escapes, output without quotes
                         i += 2; // skip $'

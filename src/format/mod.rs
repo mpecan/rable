@@ -57,6 +57,7 @@ pub fn reformat_bash(source: &str) -> Option<String> {
         || source.contains("! ")
         || source.contains('>')
         || source.contains('<')
+        || source.contains("$'")
         || has_leading_paren(source);
     if !needs_reformat {
         return None;
