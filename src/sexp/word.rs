@@ -8,6 +8,8 @@ use std::fmt;
 
 use crate::format;
 
+use crate::context::read_balanced_delim;
+
 use super::{
     ansi_c::process_ansi_c_content, extract_paren_content, normalize_cmdsub_content,
     write_escaped_char, write_escaped_word,
@@ -300,66 +302,33 @@ fn normalize_array_content(inner: &str) -> String {
                 }
             }
             '\'' => {
-                // Single-quoted string
-                current.push(chars[i]);
-                i += 1;
-                while i < chars.len() && chars[i] != '\'' {
-                    current.push(chars[i]);
-                    i += 1;
-                }
-                if i < chars.len() {
-                    current.push(chars[i]);
-                    i += 1;
-                }
+                crate::context::skip_single_quoted(&chars, &mut i, &mut current);
             }
             '"' => {
-                // Double-quoted string
+                crate::context::skip_double_quoted(&chars, &mut i, &mut current);
+            }
+            '\\' if i + 1 < chars.len() => {
                 current.push(chars[i]);
                 i += 1;
-                while i < chars.len() && chars[i] != '"' {
-                    current.push(chars[i]);
-                    if chars[i] == '\\' && i + 1 < chars.len() {
-                        i += 1;
-                        current.push(chars[i]);
-                    }
-                    i += 1;
-                }
-                if i < chars.len() {
-                    current.push(chars[i]);
-                    i += 1;
-                }
+                current.push(chars[i]);
+                i += 1;
+            }
+            '`' => {
+                crate::context::skip_backtick(&chars, &mut i, &mut current);
             }
             '$' if i + 1 < chars.len() && chars[i + 1] == '(' => {
-                // Command substitution — read matched parens
+                // Command substitution — read matched parens with quote awareness
                 current.push(chars[i]);
                 current.push(chars[i + 1]);
                 i += 2;
-                let mut depth = 1;
-                while i < chars.len() && depth > 0 {
-                    if chars[i] == '(' {
-                        depth += 1;
-                    } else if chars[i] == ')' {
-                        depth -= 1;
-                    }
-                    current.push(chars[i]);
-                    i += 1;
-                }
+                read_balanced_delim(&chars, &mut i, '(', ')', &mut current);
             }
             '$' if i + 1 < chars.len() && chars[i + 1] == '{' => {
-                // Parameter expansion — read matched braces
+                // Parameter expansion — read matched braces with quote awareness
                 current.push(chars[i]);
                 current.push(chars[i + 1]);
                 i += 2;
-                let mut depth = 1;
-                while i < chars.len() && depth > 0 {
-                    if chars[i] == '{' {
-                        depth += 1;
-                    } else if chars[i] == '}' {
-                        depth -= 1;
-                    }
-                    current.push(chars[i]);
-                    i += 1;
-                }
+                read_balanced_delim(&chars, &mut i, '{', '}', &mut current);
             }
             _ => {
                 current.push(chars[i]);

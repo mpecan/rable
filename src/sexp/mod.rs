@@ -317,31 +317,13 @@ pub(super) fn extract_paren_content(chars: &[char], pos: &mut usize) -> String {
         } else if c == '\'' {
             case.check_word(&word_buf);
             word_buf.clear();
-            content.push(c);
-            *pos += 1;
-            while *pos < chars.len() && chars[*pos] != '\'' {
-                content.push(chars[*pos]);
-                *pos += 1;
-            }
-            if *pos < chars.len() {
-                content.push(chars[*pos]); // closing '
-            }
+            crate::context::skip_single_quoted(chars, pos, &mut content);
+            continue; // skip_single_quoted already advances pos
         } else if c == '"' {
             case.check_word(&word_buf);
             word_buf.clear();
-            content.push(c);
-            *pos += 1;
-            while *pos < chars.len() && chars[*pos] != '"' {
-                content.push(chars[*pos]);
-                if chars[*pos] == '\\' && *pos + 1 < chars.len() {
-                    *pos += 1;
-                    content.push(chars[*pos]);
-                }
-                *pos += 1;
-            }
-            if *pos < chars.len() {
-                content.push(chars[*pos]); // closing "
-            }
+            crate::context::skip_double_quoted(chars, pos, &mut content);
+            continue;
         } else if c == ';' {
             case.check_word(&word_buf);
             word_buf.clear();
@@ -361,6 +343,31 @@ pub(super) fn extract_paren_content(chars: &[char], pos: &mut usize) -> String {
                     content.push(chars[*pos]);
                     case.resume_pattern();
                 }
+            }
+        } else if c == '`' {
+            case.check_word(&word_buf);
+            word_buf.clear();
+            crate::context::skip_backtick(chars, pos, &mut content);
+            continue;
+        } else if c == '#' {
+            // Comment: # after whitespace/newline skips to end of line
+            case.check_word(&word_buf);
+            word_buf.clear();
+            let prev = if content.is_empty() {
+                '\n'
+            } else {
+                content.chars().last().unwrap_or('\n')
+            };
+            if prev == '\n' || prev == ' ' || prev == '\t' {
+                while *pos < chars.len() && chars[*pos] != '\n' {
+                    *pos += 1;
+                }
+                // Don't advance past the newline — the main loop will
+                if *pos < chars.len() {
+                    *pos -= 1; // will be incremented by the outer loop
+                }
+            } else {
+                content.push(c);
             }
         } else if c == ' ' || c == '\t' || c == '\n' || c == '|' {
             case.check_word(&word_buf);
