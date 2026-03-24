@@ -188,8 +188,13 @@ impl fmt::Display for Node {
                 write_redirects(f, redirects)
             }
             Self::CondTerm { value } => {
-                // Don't escape quotes — preserve literal quote chars
-                write!(f, "(cond-term \"{value}\")")
+                // Strip $" locale prefix
+                let val = if value.starts_with("$\"") {
+                    &value[1..]
+                } else {
+                    value
+                };
+                write!(f, "(cond-term \"{val}\")")
             }
             Self::UnaryTest { op, operand } => {
                 write!(f, "(cond-unary \"{op}\" {operand})")
@@ -200,7 +205,7 @@ impl fmt::Display for Node {
             Self::CondAnd { left, right } => write!(f, "(cond-and {left} {right})"),
             Self::CondOr { left, right } => write!(f, "(cond-or {left} {right})"),
             Self::CondNot { operand } => write!(f, "(cond-not {operand})"),
-            Self::CondParen { inner } => write!(f, "(cond-paren {inner})"),
+            Self::CondParen { inner } => write!(f, "(cond-expr {inner})"),
 
             // Other
             Self::Negation { pipeline } => write!(f, "(negation {pipeline})"),

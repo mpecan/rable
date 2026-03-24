@@ -642,24 +642,45 @@ impl Parser {
 
         // Read raw text until ))
         let raw = self.lexer.read_until_double_paren()?;
-        // Split by ; into init, cond, incr
+        // Split by ; into init, cond, incr — empty parts default to "1"
         let parts: Vec<&str> = raw.splitn(3, ';').collect();
-        let init = parts.first().unwrap_or(&"").trim_start().to_string();
-        let cond = parts.get(1).unwrap_or(&"").trim_start().to_string();
-        let incr = parts.get(2).unwrap_or(&"").trim_start().to_string();
+        let default_empty = |s: &str| -> String {
+            let trimmed = s.trim_start().to_string();
+            if trimmed.is_empty() {
+                "1".to_string()
+            } else {
+                trimmed
+            }
+        };
+        let init = default_empty(parts.first().unwrap_or(&""));
+        let cond = default_empty(parts.get(1).unwrap_or(&""));
+        let incr = default_empty(parts.get(2).unwrap_or(&""));
 
-        // Consume ; or newline before do
+        // Consume ; or newline before do/{
         self.skip_newlines()?;
         if self.peek_is(TokenType::Semi)? || self.peek_is(TokenType::Newline)? {
             self.lexer.next_token()?;
         }
         self.skip_newlines()?;
         self.lexer.state.command_start = true;
-        self.expect(TokenType::Do)?;
-        self.skip_newlines()?;
-        let body = self.parse_list()?;
-        self.expect(TokenType::Done)?;
-        let redirects = self.parse_trailing_redirects()?;
+
+        // Accept either do/done or {/} for loop body
+        let (body, redirects) = if self.peek_is(TokenType::LeftBrace)? {
+            let bg = self.parse_brace_group()?;
+            let redirects = self.parse_trailing_redirects()?;
+            if let Node::BraceGroup { body, .. } = bg {
+                (*body, redirects)
+            } else {
+                (bg, redirects)
+            }
+        } else {
+            self.expect(TokenType::Do)?;
+            self.skip_newlines()?;
+            let body = self.parse_list()?;
+            self.expect(TokenType::Done)?;
+            let redirects = self.parse_trailing_redirects()?;
+            (body, redirects)
+        };
 
         Ok(Node::ForArith {
             init,
@@ -996,13 +1017,10 @@ impl Parser {
     fn parse_cond_primary(&mut self) -> Result<Node> {
         let tok = self.lexer.peek_token()?;
 
-        // Handle ! (negation)
+        // Handle ! (negation) — Parable drops the negation
         if tok.kind == TokenType::Bang {
             self.lexer.next_token()?;
-            let operand = self.parse_cond_primary()?;
-            return Ok(Node::CondNot {
-                operand: Box::new(operand),
-            });
+            return self.parse_cond_primary();
         }
 
         // Handle ( grouped expression )
@@ -1050,8 +1068,11 @@ impl Parser {
             }
         }
 
-        // Just a term (e.g., bare string test)
-        Ok(cond_term(&first.value))
+        // Bare word: implicit -n test
+        Ok(Node::UnaryTest {
+            op: "-n".to_string(),
+            operand: Box::new(cond_term(&first.value)),
+        })
     }
 
     /// Expects `}` closing token (may be `Word` or `RightBrace`).
