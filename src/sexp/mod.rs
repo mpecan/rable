@@ -277,8 +277,7 @@ impl fmt::Display for CasePattern {
 pub(super) fn extract_paren_content(chars: &[char], pos: &mut usize) -> String {
     let mut content = String::new();
     let mut depth = 1;
-    let mut case_depth = 0usize;
-    let mut in_case_pattern = false;
+    let mut case = crate::context::CaseTracker::default();
     let mut word_buf = String::new();
 
     while *pos < chars.len() {
@@ -293,20 +292,20 @@ pub(super) fn extract_paren_content(chars: &[char], pos: &mut usize) -> String {
             continue;
         }
         if c == '(' {
-            check_case_kw(&word_buf, &mut case_depth, &mut in_case_pattern);
+            case.check_word(&word_buf);
             word_buf.clear();
             // In case pattern mode, `(` is optional pattern prefix — don't increment depth
-            if !(case_depth > 0 && in_case_pattern) {
+            if !case.is_pattern_open() {
                 depth += 1;
             }
             content.push(c);
         } else if c == ')' {
-            check_case_kw(&word_buf, &mut case_depth, &mut in_case_pattern);
+            case.check_word(&word_buf);
             word_buf.clear();
-            if case_depth > 0 && in_case_pattern {
+            if case.is_pattern_close() {
                 // Case pattern terminator — don't close
                 content.push(c);
-                in_case_pattern = false;
+                case.close_pattern();
             } else {
                 depth -= 1;
                 if depth == 0 {
@@ -316,7 +315,7 @@ pub(super) fn extract_paren_content(chars: &[char], pos: &mut usize) -> String {
                 content.push(c);
             }
         } else if c == '\'' {
-            check_case_kw(&word_buf, &mut case_depth, &mut in_case_pattern);
+            case.check_word(&word_buf);
             word_buf.clear();
             content.push(c);
             *pos += 1;
@@ -328,7 +327,7 @@ pub(super) fn extract_paren_content(chars: &[char], pos: &mut usize) -> String {
                 content.push(chars[*pos]); // closing '
             }
         } else if c == '"' {
-            check_case_kw(&word_buf, &mut case_depth, &mut in_case_pattern);
+            case.check_word(&word_buf);
             word_buf.clear();
             content.push(c);
             *pos += 1;
@@ -344,11 +343,11 @@ pub(super) fn extract_paren_content(chars: &[char], pos: &mut usize) -> String {
                 content.push(chars[*pos]); // closing "
             }
         } else if c == ';' {
-            check_case_kw(&word_buf, &mut case_depth, &mut in_case_pattern);
+            case.check_word(&word_buf);
             word_buf.clear();
             content.push(c);
             // Check for ;; ;& ;;& which resume case pattern mode
-            if case_depth > 0 && *pos + 1 < chars.len() {
+            if *pos + 1 < chars.len() {
                 if chars[*pos + 1] == ';' {
                     *pos += 1;
                     content.push(chars[*pos]);
@@ -356,15 +355,15 @@ pub(super) fn extract_paren_content(chars: &[char], pos: &mut usize) -> String {
                         *pos += 1;
                         content.push(chars[*pos]);
                     }
-                    in_case_pattern = true;
+                    case.resume_pattern();
                 } else if chars[*pos + 1] == '&' {
                     *pos += 1;
                     content.push(chars[*pos]);
-                    in_case_pattern = true;
+                    case.resume_pattern();
                 }
             }
         } else if c == ' ' || c == '\t' || c == '\n' || c == '|' {
-            check_case_kw(&word_buf, &mut case_depth, &mut in_case_pattern);
+            case.check_word(&word_buf);
             word_buf.clear();
             content.push(c);
         } else {
@@ -376,20 +375,7 @@ pub(super) fn extract_paren_content(chars: &[char], pos: &mut usize) -> String {
     content
 }
 
-/// Checks case-related keywords for `extract_paren_content`.
-fn check_case_kw(word: &str, case_depth: &mut usize, in_pattern: &mut bool) {
-    match word {
-        "case" => *case_depth += 1,
-        "in" if *case_depth > 0 => *in_pattern = true,
-        "esac" if *case_depth > 0 => {
-            *case_depth -= 1;
-            if *case_depth == 0 {
-                *in_pattern = false;
-            }
-        }
-        _ => {}
-    }
-}
+// CaseTracker moved to crate::context
 
 /// Normalizes command substitution content:
 /// - Strips leading/trailing whitespace and newlines

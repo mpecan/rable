@@ -39,17 +39,7 @@ pub fn parse_word_segments(value: &str) -> Vec<WordSegment> {
     let mut in_double_quote = false; // Track "..." context
 
     while i < chars.len() {
-        // Count consecutive backslashes before current position
-        // Even count = not escaped, odd count = escaped
-        let prev_backslash = {
-            let mut count = 0;
-            let mut j = i;
-            while j > 0 && chars[j - 1] == '\\' {
-                count += 1;
-                j -= 1;
-            }
-            count % 2 != 0
-        };
+        let prev_backslash = crate::context::is_backslash_escaped(&chars, i);
 
         // Track double-quote context (not inside ${...} where quotes nest differently)
         if chars[i] == '"' && !prev_backslash && brace_depth == 0 {

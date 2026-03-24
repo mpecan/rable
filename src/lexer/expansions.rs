@@ -1,25 +1,7 @@
+use crate::context::CaseTracker;
 use crate::error::{RableError, Result};
 
 use super::Lexer;
-
-/// Checks if a completed word is a case-related keyword and updates tracking state.
-fn check_case_keyword(word: &str, case_depth: &mut usize, in_pattern: &mut bool) {
-    match word {
-        "case" => {
-            *case_depth += 1;
-        }
-        "in" if *case_depth > 0 => {
-            *in_pattern = true;
-        }
-        "esac" if *case_depth > 0 => {
-            *case_depth -= 1;
-            if *case_depth == 0 {
-                *in_pattern = false;
-            }
-        }
-        _ => {}
-    }
-}
 
 impl Lexer {
     /// Reads a dollar expansion into the value string.
@@ -112,24 +94,21 @@ impl Lexer {
         close_count: usize,
     ) -> Result<()> {
         let mut depth = close_count;
-        // Case-awareness: track case/esac nesting so `)` in case patterns
-        // doesn't close the command substitution prematurely.
-        let mut case_depth = 0usize;
-        let mut in_case_pattern = false;
+        let mut case = CaseTracker::default();
         let mut word_buf = String::new();
 
         loop {
             match self.peek_char() {
                 Some(')') => {
                     // Check keyword before consuming `)`
-                    check_case_keyword(&word_buf, &mut case_depth, &mut in_case_pattern);
+                    case.check_word(&word_buf);
                     word_buf.clear();
 
                     self.advance_char();
                     value.push(')');
-                    if case_depth > 0 && in_case_pattern {
+                    if case.is_pattern_close() {
                         // This `)` terminates a case pattern — don't decrement depth
-                        in_case_pattern = false; // now in pattern body
+                        case.close_pattern();
                     } else {
                         depth -= 1;
                         if depth == 0 {
@@ -138,24 +117,24 @@ impl Lexer {
                     }
                 }
                 Some('(') => {
-                    check_case_keyword(&word_buf, &mut case_depth, &mut in_case_pattern);
+                    case.check_word(&word_buf);
                     word_buf.clear();
                     self.advance_char();
                     value.push('(');
                     // In case pattern mode, `(` is optional pattern prefix — don't increment
-                    if !(case_depth > 0 && in_case_pattern) {
+                    if !case.is_pattern_open() {
                         depth += 1;
                     }
                 }
                 Some('\'') => {
-                    check_case_keyword(&word_buf, &mut case_depth, &mut in_case_pattern);
+                    case.check_word(&word_buf);
                     word_buf.clear();
                     self.advance_char();
                     value.push('\'');
                     self.read_single_quoted(value)?;
                 }
                 Some('"') => {
-                    check_case_keyword(&word_buf, &mut case_depth, &mut in_case_pattern);
+                    case.check_word(&word_buf);
                     word_buf.clear();
                     self.advance_char();
                     value.push('"');
@@ -184,7 +163,7 @@ impl Lexer {
                     self.read_backtick(value)?;
                 }
                 Some('#') => {
-                    check_case_keyword(&word_buf, &mut case_depth, &mut in_case_pattern);
+                    case.check_word(&word_buf);
                     word_buf.clear();
                     // # is a comment when preceded by whitespace/newline
                     let prev = value.chars().last().unwrap_or('\n');
@@ -202,36 +181,33 @@ impl Lexer {
                     }
                 }
                 Some(';') => {
-                    check_case_keyword(&word_buf, &mut case_depth, &mut in_case_pattern);
+                    case.check_word(&word_buf);
                     word_buf.clear();
                     self.advance_char();
                     value.push(';');
                     // Check for ;; ;& ;;& which resume case pattern mode
-                    if case_depth > 0 {
-                        if self.peek_char() == Some(';') {
-                            self.advance_char();
-                            value.push(';');
-                            // ;;&
-                            if self.peek_char() == Some('&') {
-                                self.advance_char();
-                                value.push('&');
-                            }
-                            in_case_pattern = true;
-                        } else if self.peek_char() == Some('&') {
+                    if self.peek_char() == Some(';') {
+                        self.advance_char();
+                        value.push(';');
+                        if self.peek_char() == Some('&') {
                             self.advance_char();
                             value.push('&');
-                            in_case_pattern = true;
                         }
+                        case.resume_pattern();
+                    } else if self.peek_char() == Some('&') {
+                        self.advance_char();
+                        value.push('&');
+                        case.resume_pattern();
                     }
                 }
                 Some(' ' | '\t' | '\n') => {
-                    check_case_keyword(&word_buf, &mut case_depth, &mut in_case_pattern);
+                    case.check_word(&word_buf);
                     word_buf.clear();
                     let c = self.advance_char().unwrap_or(' ');
                     value.push(c);
                 }
                 Some('|') => {
-                    check_case_keyword(&word_buf, &mut case_depth, &mut in_case_pattern);
+                    case.check_word(&word_buf);
                     word_buf.clear();
                     self.advance_char();
                     value.push('|');
