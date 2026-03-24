@@ -34,6 +34,8 @@ jobs:
           toolchain: "1.93.0"
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-targets
+      - name: Oracle compatibility report
+        run: cargo test oracle_test_suite -- --nocapture 2>&1 | tail -15
 
   python:
     name: Python Bindings
