@@ -1596,4 +1596,30 @@ mod tests {
         let output = format!("{}", nodes[0]);
         assert_eq!(output, r#"(arith (word "x = 5"))"#);
     }
+
+    #[test]
+    fn comment_after_command() {
+        // # after command should be stripped
+        let nodes = parse("echo hi # comment");
+        assert_eq!(nodes.len(), 1);
+        let output = format!("{}", nodes[0]);
+        assert_eq!(output, r#"(command (word "echo") (word "hi"))"#);
+    }
+
+    #[test]
+    fn hash_inside_word_not_comment() {
+        // # inside words is not a comment
+        let nodes = parse("echo ${#var}");
+        assert_eq!(nodes.len(), 1);
+        let output = format!("{}", nodes[0]);
+        assert!(output.contains("${#var}"), "got: {output}");
+    }
+
+    #[test]
+    fn line_continuation() {
+        let nodes = parse("echo hel\\\nlo");
+        assert_eq!(nodes.len(), 1);
+        let output = format!("{}", nodes[0]);
+        assert_eq!(output, r#"(command (word "echo") (word "hello"))"#);
+    }
 }
