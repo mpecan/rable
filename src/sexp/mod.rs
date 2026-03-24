@@ -411,7 +411,7 @@ pub(super) fn normalize_cmdsub_content(content: &str) -> String {
 /// Returns the processed content (without surrounding quotes).
 /// Advances `pos` past the closing `'`.
 #[allow(clippy::too_many_lines)]
-pub(super) fn process_ansi_c_content(chars: &[char], pos: &mut usize) -> String {
+pub(crate) fn process_ansi_c_content(chars: &[char], pos: &mut usize) -> String {
     let mut out = String::new();
     while *pos < chars.len() {
         let c = chars[*pos];

@@ -38,7 +38,22 @@ impl Lexer {
                     self.read_matched_parens(value, 2)?;
                 } else {
                     // $( ... ) command substitution
+                    let content_start = value.len();
                     self.read_matched_parens(value, 1)?;
+                    // Validate content is parseable bash
+                    let content_end = value.len().saturating_sub(1);
+                    if content_start < content_end {
+                        let content: String = value[content_start..content_end].to_string();
+                        if !content.trim().is_empty()
+                            && crate::parse(&content, self.extglob()).is_err()
+                        {
+                            return Err(RableError::parse(
+                                "invalid command substitution",
+                                self.pos,
+                                self.line,
+                            ));
+                        }
+                    }
                 }
             }
             Some('{') => {

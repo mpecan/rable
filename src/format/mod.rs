@@ -202,7 +202,7 @@ fn format_command(words: &[Node], redirects: &[Node], out: &mut String) {
         }
         if let Node::Word { value, .. } = w {
             // Strip $"..." locale prefix → "..."
-            out.push_str(&strip_locale_prefix(value));
+            out.push_str(&process_word_value(value));
         } else {
             out.push_str(&w.to_string());
         }
@@ -227,7 +227,7 @@ fn format_redirect(node: &Node, out: &mut String) {
             out.push(' ');
         }
         if let Node::Word { value, .. } = target.as_ref() {
-            out.push_str(value);
+            out.push_str(&process_word_value(value));
         }
     } else if let Node::HereDoc {
         delimiter,
@@ -261,21 +261,87 @@ fn format_pipeline(commands: &[Node], out: &mut String, indent: usize) {
         .collect();
     for (i, cmd) in filtered.iter().enumerate() {
         if i > 0 {
+            // Check if previous command had a heredoc — pipe placement differs
+            let prev_has_heredoc = has_heredoc_redirect(filtered[i - 1]);
+            if prev_has_heredoc {
+                // Pipe was already placed on the heredoc delimiter line
+                out.push_str("  ");
+                format_node(cmd, out, indent);
+                continue;
+            }
             out.push_str(" | ");
         }
-        format_node(cmd, out, indent);
+        // Check if this command has a heredoc redirect AND is not the last in pipeline
+        if i + 1 < filtered.len() && has_heredoc_redirect(cmd) {
+            format_command_with_heredoc_pipe(cmd, out);
+        } else {
+            format_node(cmd, out, indent);
+        }
+    }
+}
+
+/// Check if a node has heredoc redirects.
+fn has_heredoc_redirect(node: &Node) -> bool {
+    if let Node::Command { redirects, .. } = node {
+        redirects.iter().any(|r| matches!(r, Node::HereDoc { .. }))
+    } else {
+        false
+    }
+}
+
+/// Format a command that has a heredoc redirect, with ` |` placed on the delimiter line.
+fn format_command_with_heredoc_pipe(node: &Node, out: &mut String) {
+    if let Node::Command { words, redirects } = node {
+        // Format words
+        for (i, w) in words.iter().enumerate() {
+            if i > 0 {
+                out.push(' ');
+            }
+            if let Node::Word { value, .. } = w {
+                out.push_str(&process_word_value(value));
+            } else {
+                out.push_str(&w.to_string());
+            }
+        }
+        // Format redirects, inserting ` |` after the heredoc delimiter
+        for r in redirects {
+            if let Node::HereDoc {
+                delimiter,
+                content,
+                strip_tabs,
+                ..
+            } = r
+            {
+                let op = if *strip_tabs { " <<-" } else { " <<" };
+                out.push_str(op);
+                out.push_str(delimiter);
+                out.push_str(" |\n"); // pipe on delimiter line
+                out.push_str(content);
+                out.push_str(delimiter);
+                out.push('\n');
+            } else {
+                out.push(' ');
+                format_redirect(r, out);
+            }
+        }
     }
 }
 
 fn format_list(parts: &[Node], out: &mut String, indent: usize) {
     for (i, part) in parts.iter().enumerate() {
         if let Node::Operator { op } = part {
-            match op.as_str() {
-                "&&" => out.push_str(" && "),
-                "||" => out.push_str(" || "),
-                ";" => out.push_str("; "),
-                "&" => out.push_str(" & "),
-                _ => out.push_str(op),
+            // Check if previous command ended with heredoc — use newline separator
+            // The heredoc body already emits a trailing \n, so just add one more
+            if op == ";" && i > 0 && has_heredoc_redirect_deep(&parts[i - 1]) {
+                out.push('\n');
+            } else {
+                match op.as_str() {
+                    "&&" => out.push_str(" && "),
+                    "||" => out.push_str(" || "),
+                    ";" => out.push_str("; "),
+                    "&" => out.push_str(" & "),
+                    _ => out.push_str(op),
+                }
             }
         } else if i > 0 && !matches!(parts.get(i - 1), Some(Node::Operator { .. })) {
             out.push_str("; ");
@@ -283,6 +349,17 @@ fn format_list(parts: &[Node], out: &mut String, indent: usize) {
         } else {
             format_node(part, out, indent);
         }
+    }
+}
+
+/// Check if a node (or its last sub-command) has heredoc redirects.
+fn has_heredoc_redirect_deep(node: &Node) -> bool {
+    match node {
+        Node::Command { redirects, .. } => {
+            redirects.iter().any(|r| matches!(r, Node::HereDoc { .. }))
+        }
+        Node::Pipeline { commands } => commands.last().is_some_and(has_heredoc_redirect_deep),
+        _ => false,
     }
 }
 
@@ -466,18 +543,47 @@ fn has_leading_paren(source: &str) -> bool {
     source.trim_start().starts_with('(')
 }
 
-/// Strip `$"..."` locale prefix from word values, turning them into `"..."`.
-fn strip_locale_prefix(value: &str) -> String {
+/// Process a word value for canonical output:
+/// - Strip `$"..."` locale prefix → `"..."`
+/// - Process `$'...'` ANSI-C → `'processed'` (with processed escapes)
+fn process_word_value(value: &str) -> String {
     let mut result = String::with_capacity(value.len());
     let chars: Vec<char> = value.chars().collect();
     let mut i = 0;
     while i < chars.len() {
-        if chars[i] == '$' && i + 1 < chars.len() && chars[i + 1] == '"' {
-            // Skip the $ prefix
+        if chars[i] == '$' && i + 1 < chars.len() {
+            if chars[i + 1] == '"' {
+                // $"..." → "..." (strip $ prefix)
+                i += 1; // skip $
+            } else if chars[i + 1] == '\'' {
+                // $'...' → 'processed' (process escapes, output with quotes)
+                i += 2; // skip $'
+                let mut content = String::new();
+                while i < chars.len() && chars[i] != '\'' {
+                    if chars[i] == '\\' && i + 1 < chars.len() {
+                        content.push('\\');
+                        i += 1;
+                    }
+                    content.push(chars[i]);
+                    i += 1;
+                }
+                if i < chars.len() {
+                    i += 1; // skip closing '
+                }
+                let ac_chars: Vec<char> = content.chars().collect();
+                let mut pos = 0;
+                let processed = crate::sexp::process_ansi_c_content(&ac_chars, &mut pos);
+                result.push('\'');
+                result.push_str(&processed);
+                result.push('\'');
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
         } else {
             result.push(chars[i]);
+            i += 1;
         }
-        i += 1;
     }
     result
 }

@@ -29,28 +29,72 @@ pub enum WordSegment {
 }
 
 /// Parses a word's raw value into typed segments.
+#[allow(clippy::too_many_lines)]
 pub fn parse_word_segments(value: &str) -> Vec<WordSegment> {
     let chars: Vec<char> = value.chars().collect();
     let mut segments = Vec::new();
     let mut i = 0;
     let mut literal = String::new();
+    let mut brace_depth = 0usize; // Track ${...} nesting
 
     while i < chars.len() {
+        // Track closing braces for ${...}
+        if chars[i] == '}' && brace_depth > 0 {
+            brace_depth -= 1;
+            literal.push(chars[i]);
+            i += 1;
+            continue;
+        }
         let prev_backslash = i > 0 && chars[i - 1] == '\\';
+
+        // Backticks are opaque — don't process $'...' or $() inside them
+        if chars[i] == '`' && !prev_backslash {
+            literal.push(chars[i]);
+            i += 1;
+            while i < chars.len() && chars[i] != '`' {
+                if chars[i] == '\\' && i + 1 < chars.len() {
+                    literal.push(chars[i]);
+                    i += 1;
+                }
+                literal.push(chars[i]);
+                i += 1;
+            }
+            if i < chars.len() {
+                literal.push(chars[i]); // closing `
+                i += 1;
+            }
+            continue;
+        }
 
         if chars[i] == '$' && !prev_backslash && i + 1 < chars.len() {
             match chars[i + 1] {
                 '\'' => {
-                    flush_literal(&mut literal, &mut segments);
-                    i += 2; // skip $'
-                    let content = extract_ansi_c_content(&chars, &mut i);
-                    segments.push(WordSegment::AnsiCQuote(content));
+                    if brace_depth > 0 {
+                        // ANSI-C inside ${...} — process escapes, output without quotes
+                        i += 2; // skip $'
+                        let content = extract_ansi_c_content(&chars, &mut i);
+                        let ac_chars: Vec<char> = content.chars().collect();
+                        let mut pos = 0;
+                        let processed = super::process_ansi_c_content(&ac_chars, &mut pos);
+                        literal.push_str(&processed);
+                    } else {
+                        flush_literal(&mut literal, &mut segments);
+                        i += 2; // skip $'
+                        let content = extract_ansi_c_content(&chars, &mut i);
+                        segments.push(WordSegment::AnsiCQuote(content));
+                    }
                 }
                 '"' => {
                     flush_literal(&mut literal, &mut segments);
                     i += 1; // skip $, keep "
                     let content = extract_locale_content(&chars, &mut i);
                     segments.push(WordSegment::LocaleString(content));
+                }
+                '{' => {
+                    literal.push(chars[i]);
+                    literal.push(chars[i + 1]);
+                    i += 2;
+                    brace_depth += 1;
                 }
                 '(' => {
                     // $(( )) arithmetic — treat as literal (don't reformat)
