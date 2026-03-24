@@ -150,7 +150,7 @@ impl fmt::Display for Node {
                 if raw_content.is_empty() {
                     write!(f, "(arith (word \"\"))")?;
                 } else {
-                    write!(f, "(arith (word \"{}\"))", raw_content.trim())?;
+                    write!(f, "(arith (word \"{raw_content}\"))")?;
                 }
                 write_redirects(f, redirects)
             }
@@ -666,8 +666,12 @@ fn write_redirect(f: &mut fmt::Formatter<'_>, op: &str, target: &Node, _fd: i32)
         if is_fd_op && value.chars().all(|c| c.is_ascii_digit() || c == '-') {
             write!(f, "{value})")
         } else {
-            // Preserve literal quotes in redirect targets
-            write!(f, "\"{value}\")")
+            // Strip $" prefix from locale strings
+            let val = value
+                .strip_prefix('$')
+                .filter(|rest| rest.starts_with('"'))
+                .unwrap_or(value);
+            write!(f, "\"{val}\")")
         }
     } else {
         write!(f, "{target})")

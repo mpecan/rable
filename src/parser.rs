@@ -897,26 +897,28 @@ impl Parser {
             None
         };
         // Parse the rest as a simple command starting with first_tok
-        let mut words = vec![Node::Word {
-            value: first_tok.value,
-            parts: Vec::new(),
-        }];
-        // Read remaining words
+        let mut words = vec![word_node(&first_tok.value)];
+        let mut redirects = Vec::new();
         loop {
             if self.at_end()? {
                 break;
             }
+            if self.is_redirect_operator()? {
+                redirects.push(self.parse_redirect()?);
+                continue;
+            }
             let tok = self.lexer.peek_token()?;
-            if !matches!(tok.kind, TokenType::Word | TokenType::Number) {
+            if matches!(tok.kind, TokenType::Word | TokenType::Number) {
+                let tok = self.lexer.next_token()?;
+                if is_fd_number(&tok.value) && self.is_redirect_operator()? {
+                    redirects.push(self.parse_redirect_with_fd(&tok)?);
+                } else {
+                    words.push(word_node(&tok.value));
+                }
+            } else {
                 break;
             }
-            let tok = self.lexer.next_token()?;
-            words.push(Node::Word {
-                value: tok.value,
-                parts: Vec::new(),
-            });
         }
-        let redirects = self.parse_trailing_redirects()?;
         Ok(Node::Coproc {
             name,
             command: Box::new(Node::Command { words, redirects }),
