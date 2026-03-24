@@ -775,34 +775,47 @@ fn write_in_list(f: &mut fmt::Formatter<'_>, words: Option<&[Node]>) -> fmt::Res
 fn write_redirect(f: &mut fmt::Formatter<'_>, op: &str, target: &Node, _fd: i32) -> fmt::Result {
     write!(f, "(redirect \"{op}\" ")?;
     if let Node::Word { value, .. } = target {
-        // For fd operations (>&, <&, >&-, <&-), output bare number
+        // For fd dup operations (>&, <&), bare digit-only targets are unquoted
         let is_fd_op =
             op.starts_with(">&") || op.starts_with("<&") || op.ends_with("&-") || op.ends_with('&');
         if is_fd_op && !value.is_empty() && value.chars().all(|c| c.is_ascii_digit()) {
             write!(f, "{value})")
         } else if value.starts_with("$\"") {
-            // Locale string in redirect: strip $ prefix, preserve literal quotes
+            // Locale string: strip $ prefix, preserve literal quotes
             write!(f, "\"{}\")", &value[1..])
-        } else if value.starts_with("$'") {
-            // ANSI-C in redirect: process escapes, output with literal newlines
+        } else if value.starts_with("$'") && !needs_word_processing(value) {
+            // ANSI-C at start with no nested constructs: process with literal newlines
             let chars: Vec<char> = value.chars().collect();
             let mut pos = 2; // skip $'
             let processed = process_ansi_c_content(&chars, &mut pos);
-            write!(f, "\"'{processed}'\")")
-        } else if value.starts_with("<(")
-            || value.starts_with(">(")
-            || value.contains("$'")
-            || value.contains("$(")
-        {
-            // Process sub, ANSI-C, or cmdsub in redirect target: use word processing
+            // Include any text after the closing quote
+            let remaining: String = chars[pos..].iter().collect();
+            write!(f, "\"'{processed}'{remaining}\")")
+        } else if needs_word_processing(value) {
+            // Values with $'...', $"...", $(...), <(...) need segment processing
             write!(f, "\"")?;
             word::write_word_value(f, value)?;
             write!(f, "\")")
         } else {
+            // Plain values: output as-is inside quotes
             write!(f, "\"{value}\")")
         }
     } else {
         write!(f, "{target})")
+    }
+}
+
+/// Returns true if a redirect target value needs word segment processing.
+/// Note: $' and $" at the START are handled specially (literal newlines),
+/// so only mid-value occurrences or $()/<() trigger word processing.
+fn needs_word_processing(value: &str) -> bool {
+    if value.starts_with("$'") || value.starts_with("$\"") {
+        // $' or $" at start handled by special cases — only need word processing
+        // if there's ALSO a $( or <( elsewhere in the value
+        let rest = &value[2..];
+        rest.contains("$(") || rest.contains("<(") || rest.contains(">(")
+    } else {
+        value.contains("$'") || value.contains("$(") || value.contains("<(") || value.contains(">(")
     }
 }
 
