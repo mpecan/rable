@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.1.8](https://github.com/mpecan/rable/compare/rable-v0.1.7...rable-v0.1.8) (2026-03-25)
+
+
+### Features
+
+* enrich AST with structured word spans and assignment detection ([9163d24](https://github.com/mpecan/rable/commit/9163d24ecf5472da8238324ef6f7ff3a55bcf3ba))
+* enrich AST with structured word spans and assignment detection ([#11](https://github.com/mpecan/rable/issues/11)) ([3b58c38](https://github.com/mpecan/rable/commit/3b58c38180220563bb28e5656dc4d49263a94584))
+
+
+### Bug Fixes
+
+* CTLESC byte doubling for bash-oracle compatibility (179/181) ([72bc381](https://github.com/mpecan/rable/commit/72bc38192a25e034cb8d925e46b7ebfcbb9d7cf1))
+* heredoc trailing newline at EOF with backslash (180/181) ([4af8d91](https://github.com/mpecan/rable/commit/4af8d919b39792e3bdd134294639f18de3d46478))
+* resolve 11 oracle test failures (180/181) ([#13](https://github.com/mpecan/rable/issues/13)) ([69d6bc8](https://github.com/mpecan/rable/commit/69d6bc81a2cf834bed3de44ed6e190fb70d11d09))
+* resolve 3 more oracle failures (177/181) ([8aca953](https://github.com/mpecan/rable/commit/8aca95341ae09182e1535e9521c283fb85f04f61))
+* resolve 6 oracle test failures ([0496222](https://github.com/mpecan/rable/commit/049622265c85b4cd788d307ed8465406699d400d))
+* resolve 6 oracle test failures (175/181) ([1708884](https://github.com/mpecan/rable/commit/17088844f9c4c0b381dc737041f3e48bec51a02e))
+
+
+### Documentation
+
+* comprehensive documentation update ([#14](https://github.com/mpecan/rable/issues/14)) ([6abfb20](https://github.com/mpecan/rable/commit/6abfb205768b43b444dd759cda1e1411b68bc3ca))
+* comprehensive documentation update for better DX ([61114b0](https://github.com/mpecan/rable/commit/61114b043e28c75b0809d13fac48395dd9959f86))
+
+
+### Code Refactoring
+
+* remove sexp re-parsing by threading spans through all nodes ([54db8c7](https://github.com/mpecan/rable/commit/54db8c79d15689d475ec12aeadc2d28b2d62fa90))
+* simplify span collection, move to owned tokens, remove dead code ([cec7e8e](https://github.com/mpecan/rable/commit/cec7e8e5f8a245b15211598f21f1b5fedd6081d4))
+
 ## [0.1.7](https://github.com/mpecan/rable/compare/rable-v0.1.6...rable-v0.1.7) (2026-03-25)
 
 
