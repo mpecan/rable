@@ -202,26 +202,61 @@ parable_tests! {
 /// Known oracle test failures — tests that don't match bash-oracle output yet.
 /// When a fix makes one of these pass, the test suite will fail with
 /// "NEWLY PASSING" so you know to remove it from this list.
+///
+/// Set `RABLE_VERBOSE=1` to see actual vs expected for known failures.
 const KNOWN_ORACLE_FAILURES: &[&str] = &[
-    // Trailing backslash doubling
+    // --- Trailing backslash at EOF: bash doubles it, we don't ---
+    // `echo $'\>\\'\\` → we output `\\` but bash expects `\\\\`
+    // Root cause: lexer/words.rs read_word_special and quotes.rs — when
+    // advance_char() returns None after `\`, we push only `\` not `\\`
     "ansi_c_escapes 3",
     "redirect_formatting 3",
     "heredoc_formatting 1",
-    // ANSI-C \x single hex digit and \0 octal repeat behavior
+    // --- ANSI-C escape: \xN single hex digit produces 1 char, bash produces 2 ---
+    // `$'\x1'` → we output `\x01` once, bash outputs it twice
+    // Root cause: sexp/mod.rs process_ansi_c_content — bash may repeat
+    // the byte for single-digit hex escapes
     "ansi_c_escapes 13",
+    // --- ANSI-C escape: \0N octal — bash treats \0 as NUL truncation ---
+    // `$'\01Sch1'` → we output `\x01Sch1`, bash truncates at NUL to `Sch1`
+    // Root cause: sexp/mod.rs process_ansi_c_content — \01 parsed as
+    // octal 1 (non-NUL), but bash may treat \0 as NUL + literal `1Sch1`
     "other 10",
-    // Heredoc delimiter edge cases
+    // --- Heredoc: delimiter with trailing space not matched ---
+    // `$( cat <<EOF\n...\nEOF )` — the `EOF ` has trailing space before `)`
+    // Root cause: lexer/heredoc.rs — delimiter matching doesn't trim
+    // trailing whitespace on the closing line
     "ansi_c_escapes 18",
+    // --- Heredoc: `coproc <<cat` not recognized as heredoc ---
+    // Root cause: parser/compound.rs parse_coproc — doesn't check for
+    // redirect operators when the next token after `coproc` is `<<`
     "heredoc_formatting 8",
-    // Varfd {6d} not recognized → word dropped
+    // --- Varfd: `{6d}` consumed as varfd, dropping the word ---
+    // `cat {6d}<<n<text` → `{6d}` should stay as word, not be consumed
+    // Root cause: parser/helpers.rs is_varfd — too permissive, accepts
+    // `{6d}` because it contains letter `d`, but bash requires valid
+    // variable name (letters/underscore first, not digits)
     "heredoc_formatting 9",
-    // Coproc with adjacent redirect
+    // --- Coproc: `coproc<>` adjacent redirect not tokenized ---
+    // Root cause: lexer doesn't split `coproc` from `<>` when adjacent;
+    // parser/compound.rs parse_coproc doesn't handle redirects before
+    // the command word
     "redirect_formatting 7",
-    // Background & placement after heredoc in cmdsub
+    // --- Cmdsub: background `&` placed after heredoc content ---
+    // `echo $(ech<<o bg &)` → `&` should come before heredoc content
+    // Root cause: format/mod.rs — background operator ordering relative
+    // to heredoc content in reformatted command substitutions
     "cmdsub_formatting 9",
-    // Deprecated $[...] with ; splits word
+    // --- Deprecated arith: `$[...]` stops at first `]`, not balanced ---
+    // `$[$[x+1];x+1]` → should include nested `[...]` and `;`
+    // Root cause: lexer/expansions.rs read_until_char — finds first `]`
+    // without depth tracking for nested brackets
     "word_boundaries 8",
-    // Assignment detection causes esac to be keyword
+    // --- Assignment detection: `esac` after assignment becomes keyword ---
+    // `arr[0 until ]=$ esac foo` → `esac` should be a regular word
+    // Root cause: lexer/words.rs — command_start stays true after
+    // AssignmentWord, making `esac` a reserved word. Bash doesn't treat
+    // words with spaces in bracket subscripts as assignments
     "word_boundaries 2",
 ];
 
@@ -253,7 +288,14 @@ fn run_oracle_file(path: &Path, results: &mut OracleResults) {
             }
         } else {
             fail += 1;
-            if !is_known {
+            if is_known {
+                if std::env::var("RABLE_VERBOSE").is_ok() {
+                    eprintln!(
+                        "    KNOWN FAIL :: {}\n      input:    {:?}\n      expected: {:?}\n      actual:   {:?}",
+                        case.name, case.input, case.expected, actual,
+                    );
+                }
+            } else {
                 results.regressions.push(format!(
                     "  REGRESSION :: {}\n    input:    {:?}\n    expected: {:?}\n    actual:   {:?}",
                     case.name, case.input, case.expected, actual,
