@@ -6,7 +6,7 @@ use crate::token::{Token, TokenType};
 
 use super::{
     Parser,
-    helpers::{cond_term, is_cond_binary_op},
+    helpers::{cond_term_from_token, is_cond_binary_op},
 };
 
 impl Parser {
@@ -107,7 +107,7 @@ impl Parser {
                 start,
                 NodeKind::UnaryTest {
                     op: first.value,
-                    operand: Box::new(cond_term(&operand_tok.value)),
+                    operand: Box::new(cond_term_from_token(operand_tok)),
                 },
             ));
         }
@@ -128,8 +128,8 @@ impl Parser {
                     start,
                     NodeKind::BinaryTest {
                         op: op.value,
-                        left: Box::new(cond_term(&first.value)),
-                        right: Box::new(cond_term(&right.value)),
+                        left: Box::new(cond_term_from_token(first)),
+                        right: Box::new(cond_term_from_token(right)),
                     },
                 ));
             }
@@ -140,7 +140,7 @@ impl Parser {
             start,
             NodeKind::UnaryTest {
                 op: "-n".to_string(),
-                operand: Box::new(cond_term(&first.value)),
+                operand: Box::new(cond_term_from_token(first)),
             },
         ))
     }

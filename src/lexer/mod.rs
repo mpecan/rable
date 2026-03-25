@@ -5,6 +5,7 @@ mod expansions;
 mod heredoc;
 mod operators;
 mod quotes;
+pub mod word_builder;
 mod words;
 
 #[cfg(test)]

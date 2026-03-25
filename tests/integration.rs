@@ -199,66 +199,127 @@ parable_tests! {
     parable_35_parser_bugs          => "35_parser_bugs.tests",
 }
 
-/// Oracle-derived tests: correctness differences found by fuzzing against bash-oracle.
-/// These tests track progress toward full bash compatibility beyond Parable's test suite.
-/// This test reports results but does NOT fail the build.
-#[test]
-fn oracle_test_suite() {
-    let test_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/oracle");
-    if !test_dir.exists() {
-        eprintln!("Skipping: tests/oracle/ directory not found");
-        return;
-    }
+/// Known oracle test failures — tests that don't match bash-oracle output yet.
+/// When a fix makes one of these pass, the test suite will fail with
+/// "NEWLY PASSING" so you know to remove it from this list.
+const KNOWN_ORACLE_FAILURES: &[&str] = &[
+    // Trailing backslash doubling
+    "ansi_c_escapes 3",
+    "redirect_formatting 3",
+    "heredoc_formatting 1",
+    // ANSI-C \x single hex digit and \0 octal repeat behavior
+    "ansi_c_escapes 13",
+    "other 10",
+    // Heredoc delimiter edge cases
+    "ansi_c_escapes 18",
+    "heredoc_formatting 8",
+    // Varfd {6d} not recognized → word dropped
+    "heredoc_formatting 9",
+    // Coproc with adjacent redirect
+    "redirect_formatting 7",
+    // Background & placement after heredoc in cmdsub
+    "cmdsub_formatting 9",
+    // Deprecated $[...] with ; splits word
+    "word_boundaries 8",
+    // Assignment detection causes esac to be keyword
+    "word_boundaries 2",
+];
 
-    eprintln!("\n=== Oracle Test Suite (bash-oracle compatibility) ===\n");
+#[derive(Default)]
+struct OracleResults {
+    total_pass: usize,
+    total_fail: usize,
+    regressions: Vec<String>,
+    newly_passing: Vec<String>,
+}
 
-    let filter = std::env::var("RABLE_TEST").ok();
-    let mut total_pass = 0;
-    let mut total_fail = 0;
+fn run_oracle_file(path: &Path, results: &mut OracleResults) {
+    let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+    let content = fs::read_to_string(path).unwrap_or_default();
+    let cases = parse_test_file(&content);
+    let mut pass = 0;
+    let mut fail = 0;
 
-    let mut entries: Vec<_> = fs::read_dir(&test_dir)
-        .unwrap_or_else(|_| {
-            eprintln!("Warning: test directory not found: {}", test_dir.display());
-            std::process::exit(0);
-        })
-        .filter_map(Result::ok)
-        .filter(|e| e.path().extension().is_some_and(|ext| ext == "tests"))
-        .collect();
-
-    entries.sort_by_key(std::fs::DirEntry::file_name);
-
-    for entry in entries {
-        let path = entry.path();
-        let file_name = path.file_name().unwrap_or_default().to_string_lossy();
-
-        if let Some(ref f) = filter
-            && !file_name.contains(f.as_str())
-        {
-            continue;
-        }
-
-        let content = fs::read_to_string(&path).unwrap_or_default();
-        let cases = parse_test_file(&content);
-        let mut pass = 0;
-        let mut fail = 0;
-
-        for case in &cases {
-            let (passed, _actual) = run_test(case);
-            if passed {
-                pass += 1;
-            } else {
-                fail += 1;
+    for case in &cases {
+        let (passed, actual) = run_test(case);
+        let is_known = KNOWN_ORACLE_FAILURES.contains(&case.name.as_str());
+        if passed {
+            pass += 1;
+            if is_known {
+                results.newly_passing.push(format!(
+                    "  NEWLY PASSING :: {} — remove from KNOWN_ORACLE_FAILURES",
+                    case.name,
+                ));
+            }
+        } else {
+            fail += 1;
+            if !is_known {
+                results.regressions.push(format!(
+                    "  REGRESSION :: {}\n    input:    {:?}\n    expected: {:?}\n    actual:   {:?}",
+                    case.name, case.input, case.expected, actual,
+                ));
             }
         }
-
-        let total = pass + fail;
-        let status = if fail == 0 { "OK" } else { "FAIL" };
-        eprintln!("  {file_name}: {pass}/{total} passed [{status}]");
-        total_pass += pass;
-        total_fail += fail;
     }
 
-    let total = total_pass + total_fail;
-    eprintln!("\n=== Oracle Results: {total_pass}/{total} passed ({total_fail} remaining) ===\n");
-    // Intentionally does not assert — these are aspirational targets
+    let total = pass + fail;
+    let status = if fail == 0 { "OK" } else { "FAIL" };
+    eprintln!("  {file_name}: {pass}/{total} passed [{status}]");
+    results.total_pass += pass;
+    results.total_fail += fail;
 }
+
+/// Generates a test function for each oracle test file.
+/// Each test asserts no regressions and no newly passing tests
+/// (which would need `KNOWN_ORACLE_FAILURES` updated).
+macro_rules! oracle_test {
+    ($name:ident, $file:expr) => {
+        #[test]
+        fn $name() {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/oracle")
+                .join($file);
+            if !path.exists() {
+                eprintln!("Skipping: {} not found", $file);
+                return;
+            }
+            let mut results = OracleResults::default();
+            run_oracle_file(&path, &mut results);
+            let total = results.total_pass + results.total_fail;
+            eprintln!(
+                "  {}: {}/{total} passed ({} remaining)",
+                $file, results.total_pass, results.total_fail,
+            );
+            for msg in &results.newly_passing {
+                eprintln!("{msg}");
+            }
+            for msg in &results.regressions {
+                eprintln!("{msg}");
+            }
+            assert!(
+                results.regressions.is_empty(),
+                "{}: {} regression(s)",
+                $file,
+                results.regressions.len()
+            );
+            assert!(
+                results.newly_passing.is_empty(),
+                "{}: {} newly passing — update KNOWN_ORACLE_FAILURES",
+                $file,
+                results.newly_passing.len()
+            );
+        }
+    };
+}
+
+oracle_test!(oracle_ansi_c_escapes, "ansi_c_escapes.tests");
+oracle_test!(oracle_ansi_c_processing, "ansi_c_processing.tests");
+oracle_test!(oracle_array_normalization, "array_normalization.tests");
+oracle_test!(oracle_cmdsub_formatting, "cmdsub_formatting.tests");
+oracle_test!(oracle_heredoc_formatting, "heredoc_formatting.tests");
+oracle_test!(oracle_locale_strings, "locale_strings.tests");
+oracle_test!(oracle_other, "other.tests");
+oracle_test!(oracle_procsub_formatting, "procsub_formatting.tests");
+oracle_test!(oracle_redirect_formatting, "redirect_formatting.tests");
+oracle_test!(oracle_top_level_separation, "top_level_separation.tests");
+oracle_test!(oracle_word_boundaries, "word_boundaries.tests");

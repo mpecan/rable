@@ -72,7 +72,14 @@ impl Node {
 #[allow(clippy::use_self)]
 pub enum NodeKind {
     /// A word token, possibly containing expansion parts.
-    Word { value: String, parts: Vec<Node> },
+    Word {
+        value: String,
+        parts: Vec<Node>,
+        spans: Vec<crate::lexer::word_builder::WordSpan>,
+    },
+
+    /// A literal text segment within a word's parts list.
+    WordLiteral { value: String },
 
     /// A simple command: assignments, words, and redirects.
     Command {
@@ -318,7 +325,10 @@ pub enum NodeKind {
     CondParen { inner: Box<Node> },
 
     /// A term (word) in a conditional expression.
-    CondTerm { value: String },
+    CondTerm {
+        value: String,
+        spans: Vec<crate::lexer::word_builder::WordSpan>,
+    },
 
     // -- Other --
     /// Pipeline negation with `!`.

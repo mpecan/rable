@@ -86,3 +86,220 @@ fn and_or() {
     assert_eq!(tokens[1], (TokenType::And, "&&".to_string()));
     assert_eq!(tokens[3], (TokenType::Or, "||".to_string()));
 }
+
+#[test]
+fn assignment_word_simple() {
+    let tokens = collect_tokens("FOO=bar");
+    assert_eq!(
+        tokens[0],
+        (TokenType::AssignmentWord, "FOO=bar".to_string())
+    );
+}
+
+#[test]
+fn assignment_word_plus_equals() {
+    let tokens = collect_tokens("FOO+=bar");
+    assert_eq!(
+        tokens[0],
+        (TokenType::AssignmentWord, "FOO+=bar".to_string())
+    );
+}
+
+#[test]
+fn assignment_word_array() {
+    let tokens = collect_tokens("arr=(a b)");
+    assert_eq!(
+        tokens[0],
+        (TokenType::AssignmentWord, "arr=(a b)".to_string())
+    );
+}
+
+#[test]
+fn assignment_word_subscript() {
+    let tokens = collect_tokens("arr[0]=val");
+    assert_eq!(
+        tokens[0],
+        (TokenType::AssignmentWord, "arr[0]=val".to_string())
+    );
+}
+
+#[test]
+fn not_assignment_no_name() {
+    let tokens = collect_tokens("=value");
+    assert_eq!(tokens[0].0, TokenType::Word);
+}
+
+#[test]
+fn not_assignment_regular_word() {
+    let tokens = collect_tokens("echo");
+    assert_eq!(tokens[0].0, TokenType::Word);
+}
+
+#[test]
+fn assignment_before_command_keeps_command_start() {
+    // Assignment tokens should keep command_start=true so the
+    // command word after is still recognized
+    let tokens = collect_tokens("FOO=bar echo hello");
+    assert_eq!(tokens[0].0, TokenType::AssignmentWord);
+    assert_eq!(tokens[1].0, TokenType::Word);
+    assert_eq!(tokens[2].0, TokenType::Word);
+}
+
+// -- Span recording tests --
+
+use super::word_builder::{WordSpan, WordSpanKind};
+
+#[allow(clippy::unwrap_used)]
+fn first_word_spans(source: &str) -> (String, Vec<WordSpan>) {
+    let mut lexer = Lexer::new(source, false);
+    let tok = lexer.next_token().unwrap();
+    (tok.value, tok.spans)
+}
+
+#[test]
+fn span_plain_word_no_spans() {
+    let (_, spans) = first_word_spans("echo");
+    assert!(spans.is_empty());
+}
+
+#[test]
+fn span_command_sub() {
+    let (val, spans) = first_word_spans("$(cmd)");
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].kind, WordSpanKind::CommandSub);
+    assert_eq!(spans[0].start, 0);
+    assert_eq!(spans[0].end, val.len());
+}
+
+#[test]
+fn span_command_sub_mid_word() {
+    let (_, spans) = first_word_spans("hello$(world)end");
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].kind, WordSpanKind::CommandSub);
+    assert_eq!(spans[0].start, 5);
+    assert_eq!(spans[0].end, 13);
+}
+
+#[test]
+fn span_arithmetic_sub() {
+    let (val, spans) = first_word_spans("$((1+2))");
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].kind, WordSpanKind::ArithmeticSub);
+    assert_eq!(spans[0].start, 0);
+    assert_eq!(spans[0].end, val.len());
+}
+
+#[test]
+fn span_param_expansion() {
+    let (val, spans) = first_word_spans("${var:-default}");
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].kind, WordSpanKind::ParamExpansion);
+    assert_eq!(spans[0].start, 0);
+    assert_eq!(spans[0].end, val.len());
+}
+
+#[test]
+fn span_simple_var() {
+    let (val, spans) = first_word_spans("$HOME");
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].kind, WordSpanKind::SimpleVar);
+    assert_eq!(spans[0].start, 0);
+    assert_eq!(spans[0].end, val.len());
+}
+
+#[test]
+fn span_ansi_c_quote() {
+    let (val, spans) = first_word_spans("$'foo'");
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].kind, WordSpanKind::AnsiCQuote);
+    assert_eq!(spans[0].start, 0);
+    assert_eq!(spans[0].end, val.len());
+}
+
+#[test]
+fn span_locale_string() {
+    let (val, spans) = first_word_spans("$\"hello\"");
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].kind, WordSpanKind::LocaleString);
+    assert_eq!(spans[0].start, 0);
+    assert_eq!(spans[0].end, val.len());
+}
+
+#[test]
+fn span_single_quoted() {
+    let (val, spans) = first_word_spans("'quoted'");
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].kind, WordSpanKind::SingleQuoted);
+    assert_eq!(spans[0].start, 0);
+    assert_eq!(spans[0].end, val.len());
+}
+
+#[test]
+fn span_double_quoted() {
+    let (val, spans) = first_word_spans("\"double\"");
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].kind, WordSpanKind::DoubleQuoted);
+    assert_eq!(spans[0].start, 0);
+    assert_eq!(spans[0].end, val.len());
+}
+
+#[test]
+fn span_backtick() {
+    let (val, spans) = first_word_spans("`cmd`");
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].kind, WordSpanKind::Backtick);
+    assert_eq!(spans[0].start, 0);
+    assert_eq!(spans[0].end, val.len());
+}
+
+#[test]
+fn span_escape() {
+    let (val, spans) = first_word_spans("\\n");
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].kind, WordSpanKind::Escape);
+    assert_eq!(spans[0].start, 0);
+    assert_eq!(spans[0].end, val.len());
+}
+
+#[test]
+fn span_line_continuation_no_span() {
+    // \<newline> is a line continuation — nothing pushed, no span
+    let (val, spans) = first_word_spans("hel\\\nlo");
+    assert_eq!(val, "hello");
+    assert!(spans.is_empty());
+}
+
+#[test]
+fn span_bare_dollar_no_span() {
+    // Bare $ at end — no expansion, no span
+    let tokens = collect_tokens("echo $");
+    assert_eq!(tokens[1].1, "$");
+    // The $ word has no spans (bare dollar)
+    let (_, spans) = first_word_spans("$");
+    assert!(spans.is_empty());
+}
+
+#[test]
+fn span_nested_double_quoted_with_cmdsub() {
+    // "$(cmd)" — DoubleQuoted span contains CommandSub span
+    let (val, spans) = first_word_spans("\"$(cmd)\"");
+    assert_eq!(val, "\"$(cmd)\"");
+    assert_eq!(spans.len(), 2);
+    // CommandSub is recorded first (inside read_dollar, before
+    // DoubleQuoted is closed by read_word_special)
+    assert_eq!(spans[0].kind, WordSpanKind::CommandSub);
+    assert_eq!(spans[0].start, 1);
+    assert_eq!(spans[0].end, 7);
+    assert_eq!(spans[1].kind, WordSpanKind::DoubleQuoted);
+    assert_eq!(spans[1].start, 0);
+    assert_eq!(spans[1].end, 8);
+}
+
+#[test]
+fn span_deprecated_arith() {
+    let (val, spans) = first_word_spans("$[1+2]");
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].kind, WordSpanKind::DeprecatedArith);
+    assert_eq!(spans[0].start, 0);
+    assert_eq!(spans[0].end, val.len());
+}

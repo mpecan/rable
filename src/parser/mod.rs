@@ -1,6 +1,7 @@
 mod compound;
 mod conditional;
 pub mod helpers;
+mod word_parts;
 
 use crate::ast::{ListItem, ListOperator, Node, NodeKind, PipeSep, Span};
 use crate::error::{RableError, Result};
@@ -9,7 +10,7 @@ use crate::token::{Token, TokenType};
 
 use helpers::{
     add_stderr_redirect, fill_heredoc_contents, is_fd_number, is_varfd, make_stderr_redirect,
-    parse_heredoc_delimiter, word_node,
+    parse_heredoc_delimiter, word_node, word_node_from_token,
 };
 
 /// Maximum recursion/iteration depth to prevent infinite loops.
@@ -423,11 +424,11 @@ impl Parser {
             // After |, time is a regular word, not a keyword.
             // Temporarily demote it and all following reserved words to words.
             let time_tok = self.lexer.next_token()?;
-            let mut words = vec![word_node(&time_tok.value)];
+            let mut words = vec![word_node_from_token(time_tok)];
             // Check for -p flag (also a word in this context)
             if self.check_word("-p")? {
                 let p_tok = self.lexer.next_token()?;
-                words.push(word_node(&p_tok.value));
+                words.push(word_node_from_token(p_tok));
             }
             // Consume all remaining words (including reserved words as plain words)
             let mut redirects = Vec::new();
@@ -455,7 +456,7 @@ impl Parser {
                     continue;
                 }
                 let t = self.lexer.next_token()?;
-                words.push(word_node(&t.value));
+                words.push(word_node_from_token(t));
             }
             Ok(self.spanned(
                 start,
@@ -567,10 +568,12 @@ impl Parser {
                             return self.parse_function_def(&tok);
                         }
                         let word_span = Span::new(tok.pos, tok.pos + tok.value.len());
+                        let parts = word_parts::decompose_word_with_spans(&tok.value, &tok.spans);
                         let node = Node::new(
                             NodeKind::Word {
                                 value: tok.value,
-                                parts: Vec::new(),
+                                parts,
+                                spans: tok.spans,
                             },
                             word_span,
                         );
@@ -676,7 +679,7 @@ impl Parser {
             start,
             NodeKind::Redirect {
                 op: op_tok.value,
-                target: Box::new(word_node(&target_tok.value)),
+                target: Box::new(word_node_from_token(target_tok)),
                 fd,
             },
         ))

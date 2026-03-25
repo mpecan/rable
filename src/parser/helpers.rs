@@ -1,19 +1,32 @@
 //! Helper functions for the parser.
 
 use crate::ast::{Node, NodeKind};
+use crate::token::Token;
 
-/// Creates a `Word` node with no parts.
-pub fn word_node(value: &str) -> Node {
+/// Creates a `Word` node from a lexer token, moving value and spans.
+pub fn word_node_from_token(tok: Token) -> Node {
+    let parts = super::word_parts::decompose_word_with_spans(&tok.value, &tok.spans);
     Node::empty(NodeKind::Word {
-        value: value.to_string(),
-        parts: Vec::new(),
+        parts,
+        value: tok.value,
+        spans: tok.spans,
     })
 }
 
-/// Creates a `cond-term` node for conditional expressions.
-pub(super) fn cond_term(value: &str) -> Node {
-    Node::empty(NodeKind::CondTerm {
+/// Creates a `Word` node for synthetic values (no lexer token).
+pub fn word_node(value: &str) -> Node {
+    Node::empty(NodeKind::Word {
+        parts: super::word_parts::decompose_word_literal(value),
         value: value.to_string(),
+        spans: Vec::new(),
+    })
+}
+
+/// Creates a `cond-term` node from a lexer token, moving value and spans.
+pub(super) fn cond_term_from_token(tok: Token) -> Node {
+    Node::empty(NodeKind::CondTerm {
+        value: tok.value,
+        spans: tok.spans,
     })
 }
 
@@ -77,7 +90,10 @@ pub(super) fn make_stderr_redirect() -> Node {
         op: ">&".to_string(),
         target: Box::new(Node::empty(NodeKind::Word {
             value: "1".to_string(),
-            parts: Vec::new(),
+            parts: vec![Node::empty(NodeKind::WordLiteral {
+                value: "1".to_string(),
+            })],
+            spans: Vec::new(),
         })),
         fd: 2,
     })

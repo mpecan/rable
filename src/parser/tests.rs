@@ -196,22 +196,74 @@ fn line_continuation() {
 
 #[test]
 fn command_has_assignments_field() {
-    // The lexer doesn't currently produce AssignmentWord tokens,
-    // so assignments stay in words. This test verifies the
-    // Command variant has the assignments field and S-expression
-    // output is unchanged.
     let nodes = parse("FOO=bar cmd arg");
     assert_eq!(nodes.len(), 1);
     assert!(matches!(
         &nodes[0].kind,
         NodeKind::Command { assignments, words, .. }
-        if assignments.is_empty() && words.len() == 3
+        if assignments.len() == 1 && words.len() == 2
     ));
+    // S-expression output is unchanged (assignments and words are merged)
     let output = format!("{}", nodes[0]);
     assert_eq!(
         output,
         r#"(command (word "FOO=bar") (word "cmd") (word "arg"))"#
     );
+}
+
+#[test]
+fn multiple_assignments_before_command() {
+    let nodes = parse("a=1 b=2 cmd");
+    assert_eq!(nodes.len(), 1);
+    assert!(matches!(
+        &nodes[0].kind,
+        NodeKind::Command { assignments, words, .. }
+        if assignments.len() == 2 && words.len() == 1
+    ));
+}
+
+#[test]
+fn assignment_after_command_word_stays_in_words() {
+    let nodes = parse("cmd FOO=bar");
+    assert_eq!(nodes.len(), 1);
+    assert!(matches!(
+        &nodes[0].kind,
+        NodeKind::Command { assignments, words, .. }
+        if assignments.is_empty() && words.len() == 2
+    ));
+}
+
+#[test]
+fn plus_equals_assignment() {
+    let nodes = parse("FOO+=bar cmd");
+    assert_eq!(nodes.len(), 1);
+    assert!(matches!(
+        &nodes[0].kind,
+        NodeKind::Command { assignments, words, .. }
+        if assignments.len() == 1 && words.len() == 1
+    ));
+}
+
+#[test]
+fn array_assignment() {
+    let nodes = parse("arr=(a b c) cmd");
+    assert_eq!(nodes.len(), 1);
+    assert!(matches!(
+        &nodes[0].kind,
+        NodeKind::Command { assignments, words, .. }
+        if assignments.len() == 1 && words.len() == 1
+    ));
+}
+
+#[test]
+fn bare_assignment_no_command() {
+    let nodes = parse("FOO=bar");
+    assert_eq!(nodes.len(), 1);
+    assert!(matches!(
+        &nodes[0].kind,
+        NodeKind::Command { assignments, words, .. }
+        if assignments.len() == 1 && words.is_empty()
+    ));
 }
 
 #[test]

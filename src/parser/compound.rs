@@ -7,7 +7,7 @@ use crate::token::{Token, TokenType};
 
 use super::{
     Parser,
-    helpers::{is_fd_number, word_node},
+    helpers::{is_fd_number, word_node, word_node_from_token},
 };
 
 impl Parser {
@@ -148,13 +148,14 @@ impl Parser {
                     break;
                 }
                 let tok = self.lexer.next_token()?;
-                ws.push(word_node(&tok.value));
+                ws.push(word_node_from_token(tok));
             }
             Some(ws)
         } else {
             Some(vec![Node::empty(NodeKind::Word {
+                parts: super::word_parts::decompose_word_literal("\"$@\""),
                 value: "\"$@\"".to_string(),
-                parts: Vec::new(),
+                spans: Vec::new(),
             })])
         };
 
@@ -241,8 +242,12 @@ impl Parser {
         let word_tok = self.lexer.next_token()?;
         let word = Box::new(Node::new(
             NodeKind::Word {
+                parts: super::word_parts::decompose_word_with_spans(
+                    &word_tok.value,
+                    &word_tok.spans,
+                ),
                 value: word_tok.value.clone(),
-                parts: Vec::new(),
+                spans: word_tok.spans,
             },
             Span::new(word_tok.pos, word_tok.pos + word_tok.value.len()),
         ));
@@ -287,7 +292,7 @@ impl Parser {
             if tok.kind == TokenType::Pipe {
                 continue;
             }
-            pattern_words.push(word_node(&tok.value));
+            pattern_words.push(word_node_from_token(tok));
         }
 
         self.skip_newlines()?;
@@ -346,7 +351,7 @@ impl Parser {
                     break;
                 }
                 let tok = self.lexer.next_token()?;
-                ws.push(word_node(&tok.value));
+                ws.push(word_node_from_token(tok));
             }
             Some(ws)
         } else {
@@ -511,7 +516,7 @@ impl Parser {
         } else {
             None
         };
-        let mut words = vec![word_node(&first_tok.value)];
+        let mut words = vec![word_node_from_token(first_tok)];
         let mut redirects = Vec::new();
         loop {
             if self.at_end()? {
@@ -527,7 +532,7 @@ impl Parser {
                 if is_fd_number(&tok.value) && self.is_redirect_operator()? {
                     redirects.push(self.parse_redirect_with_fd(&tok)?);
                 } else {
-                    words.push(word_node(&tok.value));
+                    words.push(word_node_from_token(tok));
                 }
             } else {
                 break;
