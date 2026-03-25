@@ -1,27 +1,84 @@
+/// Source span representing a byte range in the original input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl Span {
+    /// Creates a new span with the given byte offsets.
+    pub const fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+
+    /// Creates an empty span (used for synthetic nodes).
+    pub const fn empty() -> Self {
+        Self { start: 0, end: 0 }
+    }
+
+    /// Returns true if this span has no extent (synthetic or unset).
+    pub const fn is_empty(&self) -> bool {
+        self.start >= self.end
+    }
+}
+
+/// A spanned AST node combining a [`NodeKind`] with its source [`Span`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Node {
+    pub kind: NodeKind,
+    pub span: Span,
+}
+
+impl Node {
+    /// Creates a new node with the given kind and span.
+    pub const fn new(kind: NodeKind, span: Span) -> Self {
+        Self { kind, span }
+    }
+
+    /// Creates a node with an empty span (for synthetic or temporary nodes).
+    pub const fn empty(kind: NodeKind) -> Self {
+        Self {
+            kind,
+            span: Span::empty(),
+        }
+    }
+
+    /// Extracts the source text for this node from the original source string.
+    ///
+    /// Returns an empty string for synthetic nodes or invalid spans.
+    pub fn source_text<'a>(&self, source: &'a str) -> &'a str {
+        if self.span.is_empty() || self.span.end > source.len() {
+            return "";
+        }
+        &source[self.span.start..self.span.end]
+    }
+}
+
 /// AST node representing all bash constructs.
 ///
 /// This enum mirrors Parable's AST node classes exactly, ensuring
 /// S-expression output compatibility.
 #[derive(Debug, Clone, PartialEq)]
 #[allow(clippy::use_self)]
-pub enum Node {
+pub enum NodeKind {
     /// A word token, possibly containing expansion parts.
     Word { value: String, parts: Vec<Node> },
 
-    /// A simple command: words and redirects.
+    /// A simple command: assignments, words, and redirects.
     Command {
+        assignments: Vec<Node>,
         words: Vec<Node>,
         redirects: Vec<Node>,
     },
 
-    /// A pipeline of commands separated by `|`.
-    Pipeline { commands: Vec<Node> },
+    /// A pipeline of commands separated by `|` or `|&`.
+    Pipeline {
+        commands: Vec<Node>,
+        separators: Vec<PipeSep>,
+    },
 
     /// A list of commands with operators (`;`, `&&`, `||`, `&`, `\n`).
-    List { parts: Vec<Node> },
-
-    /// An operator between commands in a list.
-    Operator { op: String },
+    List { items: Vec<ListItem> },
 
     // -- Compound commands --
     /// `if condition; then body; [elif ...; then ...;] [else ...;] fi`
@@ -260,9 +317,6 @@ pub enum Node {
     /// `time [-p] pipeline`
     Time { pipeline: Box<Node>, posix: bool },
 
-    /// Marker for `|&` (pipe both stdout and stderr).
-    PipeBoth,
-
     /// Array literal: `(a b c)`.
     Array { elements: Vec<Node> },
 
@@ -271,6 +325,35 @@ pub enum Node {
 
     /// A comment: `# text`.
     Comment { text: String },
+}
+
+/// Operator between commands in a list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListOperator {
+    /// `&&`
+    And,
+    /// `||`
+    Or,
+    /// `;` or `\n`
+    Semi,
+    /// `&`
+    Background,
+}
+
+/// Separator between commands in a pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PipeSep {
+    /// `|` — pipe stdout only.
+    Pipe,
+    /// `|&` — pipe both stdout and stderr.
+    PipeBoth,
+}
+
+/// An item in a command list: a command with an optional trailing operator.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListItem {
+    pub command: Node,
+    pub operator: Option<ListOperator>,
 }
 
 /// A single case pattern clause within a `case` statement.

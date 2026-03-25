@@ -5,7 +5,7 @@
 
 use std::cell::Cell;
 
-use crate::ast::{CasePattern, Node};
+use crate::ast::{CasePattern, ListItem, ListOperator, Node, NodeKind};
 
 thread_local! {
     static REFORMAT_DEPTH: Cell<usize> = const { Cell::new(0) };
@@ -70,35 +70,39 @@ pub fn reformat_bash(source: &str) -> Option<String> {
 /// Formats a single AST node into canonical bash source.
 #[allow(clippy::too_many_lines)]
 fn format_node(node: &Node, out: &mut String, indent: usize) {
-    match node {
-        Node::Word { value, .. } => out.push_str(value),
-        Node::Command { words, redirects } => {
-            format_command(words, redirects, out);
+    match &node.kind {
+        NodeKind::Word { value, .. } => out.push_str(value),
+        NodeKind::Command {
+            assignments,
+            words,
+            redirects,
+        } => {
+            format_command(assignments, words, redirects, out);
         }
-        Node::Pipeline { commands } => format_pipeline(commands, out, indent),
-        Node::List { parts } => format_list(parts, out, indent),
-        Node::If {
+        NodeKind::Pipeline { commands, .. } => format_pipeline(commands, out, indent),
+        NodeKind::List { items } => format_list(items, out, indent),
+        NodeKind::If {
             condition,
             then_body,
             else_body,
             ..
         } => format_if(condition, then_body, else_body.as_deref(), out, indent),
-        Node::While {
+        NodeKind::While {
             condition,
             body,
             redirects,
             ..
         } => format_while_until("while", condition, body, redirects, out, indent),
-        Node::Until {
+        NodeKind::Until {
             condition,
             body,
             redirects,
             ..
         } => format_while_until("until", condition, body, redirects, out, indent),
-        Node::For {
+        NodeKind::For {
             var, words, body, ..
         } => format_for(var, words.as_deref(), body, out, indent),
-        Node::ForArith {
+        NodeKind::ForArith {
             init,
             cond,
             incr,
@@ -120,19 +124,19 @@ fn format_node(node: &Node, out: &mut String, indent: usize) {
             indent_str(out, indent);
             out.push_str("done");
         }
-        Node::Case {
+        NodeKind::Case {
             word,
             patterns,
             redirects,
             ..
         } => format_case(word, patterns, redirects, out, indent),
-        Node::Function { name, body } => {
+        NodeKind::Function { name, body } => {
             out.push_str("function ");
             out.push_str(name);
             out.push_str(" () \n");
             format_function_body(body, out, indent);
         }
-        Node::Subshell {
+        NodeKind::Subshell {
             body, redirects, ..
         } => {
             out.push_str("( ");
@@ -143,7 +147,7 @@ fn format_node(node: &Node, out: &mut String, indent: usize) {
                 format_redirect(r, out);
             }
         }
-        Node::BraceGroup {
+        NodeKind::BraceGroup {
             body, redirects, ..
         } => {
             out.push_str("{ ");
@@ -154,11 +158,11 @@ fn format_node(node: &Node, out: &mut String, indent: usize) {
                 format_redirect(r, out);
             }
         }
-        Node::Negation { pipeline } => {
+        NodeKind::Negation { pipeline } => {
             out.push_str("! ");
             format_node(pipeline, out, indent);
         }
-        Node::Time { pipeline, posix } => {
+        NodeKind::Time { pipeline, posix } => {
             if *posix {
                 out.push_str("time -p ");
             } else {
@@ -166,7 +170,7 @@ fn format_node(node: &Node, out: &mut String, indent: usize) {
             }
             format_node(pipeline, out, indent);
         }
-        Node::Coproc { name, command } => {
+        NodeKind::Coproc { name, command } => {
             out.push_str("coproc ");
             if let Some(n) = name {
                 out.push_str(n);
@@ -174,43 +178,47 @@ fn format_node(node: &Node, out: &mut String, indent: usize) {
             }
             format_node(command, out, indent);
         }
-        Node::ConditionalExpr { body, .. } => {
+        NodeKind::ConditionalExpr { body, .. } => {
             out.push_str("[[ ");
             format_cond_node(body, out);
             out.push_str(" ]]");
         }
-        Node::Empty => {}
+        NodeKind::Empty => {}
         _ => {
             out.push_str(&node.to_string());
         }
     }
 }
 
-fn format_command(words: &[Node], redirects: &[Node], out: &mut String) {
-    for (i, w) in words.iter().enumerate() {
-        if i > 0 {
-            out.push(' ');
-        }
-        if let Node::Word { value, .. } = w {
-            // Strip $"..." locale prefix → "..."
-            out.push_str(&process_word_value(value));
-        } else {
-            out.push_str(&w.to_string());
-        }
-    }
+fn format_command(assignments: &[Node], words: &[Node], redirects: &[Node], out: &mut String) {
+    format_command_words(assignments, words, out);
     for (i, r) in redirects.iter().enumerate() {
-        if !words.is_empty() || i > 0 {
+        if !assignments.is_empty() || !words.is_empty() || i > 0 {
             out.push(' ');
         }
         format_redirect(r, out);
     }
 }
 
+/// Writes assignments and command words as space-separated bash tokens.
+fn format_command_words(assignments: &[Node], words: &[Node], out: &mut String) {
+    for (i, w) in assignments.iter().chain(words.iter()).enumerate() {
+        if i > 0 {
+            out.push(' ');
+        }
+        if let NodeKind::Word { value, .. } = &w.kind {
+            out.push_str(&process_word_value(value));
+        } else {
+            out.push_str(&w.to_string());
+        }
+    }
+}
+
 fn format_redirect(node: &Node, out: &mut String) {
-    if let Node::Redirect { op, target, fd } = node {
+    if let NodeKind::Redirect { op, target, fd } = &node.kind {
         // Close-fd redirects: >&- with target fd → output as "fd>&-"
         if op == ">&-" {
-            if let Node::Word { value, .. } = target.as_ref() {
+            if let NodeKind::Word { value, .. } = &target.kind {
                 out.push_str(value);
             }
             out.push_str(">&-");
@@ -225,15 +233,15 @@ fn format_redirect(node: &Node, out: &mut String) {
         if !is_dup {
             out.push(' ');
         }
-        if let Node::Word { value, .. } = target.as_ref() {
+        if let NodeKind::Word { value, .. } = &target.kind {
             out.push_str(&process_word_value(value));
         }
-    } else if let Node::HereDoc {
+    } else if let NodeKind::HereDoc {
         delimiter,
         content,
         strip_tabs,
         ..
-    } = node
+    } = &node.kind
     {
         let op = if *strip_tabs { "<<-" } else { "<<" };
         out.push_str(op);
@@ -254,14 +262,10 @@ const fn default_fd_for_op(op: &str) -> i32 {
 }
 
 fn format_pipeline(commands: &[Node], out: &mut String, indent: usize) {
-    let filtered: Vec<_> = commands
-        .iter()
-        .filter(|c| !matches!(c, Node::PipeBoth))
-        .collect();
-    for (i, cmd) in filtered.iter().enumerate() {
+    for (i, cmd) in commands.iter().enumerate() {
         if i > 0 {
             // Check if previous command had a heredoc — pipe placement differs
-            let prev_has_heredoc = has_heredoc_redirect(filtered[i - 1]);
+            let prev_has_heredoc = has_heredoc_redirect_deep(&commands[i - 1]);
             if prev_has_heredoc {
                 // Pipe was already placed on the heredoc delimiter line
                 out.push_str("  ");
@@ -271,7 +275,7 @@ fn format_pipeline(commands: &[Node], out: &mut String, indent: usize) {
             out.push_str(" | ");
         }
         // Check if this command has a heredoc redirect AND is not the last in pipeline
-        if i + 1 < filtered.len() && has_heredoc_redirect(cmd) {
+        if i + 1 < commands.len() && has_heredoc_redirect_deep(cmd) {
             format_command_with_heredoc_pipe(cmd, out);
         } else {
             format_node(cmd, out, indent);
@@ -279,37 +283,22 @@ fn format_pipeline(commands: &[Node], out: &mut String, indent: usize) {
     }
 }
 
-/// Check if a node has heredoc redirects.
-fn has_heredoc_redirect(node: &Node) -> bool {
-    if let Node::Command { redirects, .. } = node {
-        redirects.iter().any(|r| matches!(r, Node::HereDoc { .. }))
-    } else {
-        false
-    }
-}
-
 /// Format a command that has a heredoc redirect, with ` |` placed on the delimiter line.
 fn format_command_with_heredoc_pipe(node: &Node, out: &mut String) {
-    if let Node::Command { words, redirects } = node {
-        // Format words
-        for (i, w) in words.iter().enumerate() {
-            if i > 0 {
-                out.push(' ');
-            }
-            if let Node::Word { value, .. } = w {
-                out.push_str(&process_word_value(value));
-            } else {
-                out.push_str(&w.to_string());
-            }
-        }
-        // Format redirects, inserting ` |` after the heredoc delimiter
+    if let NodeKind::Command {
+        assignments,
+        words,
+        redirects,
+    } = &node.kind
+    {
+        format_command_words(assignments, words, out);
         for r in redirects {
-            if let Node::HereDoc {
+            if let NodeKind::HereDoc {
                 delimiter,
                 content,
                 strip_tabs,
                 ..
-            } = r
+            } = &r.kind
             {
                 let op = if *strip_tabs { " <<-" } else { " <<" };
                 out.push_str(op);
@@ -326,38 +315,39 @@ fn format_command_with_heredoc_pipe(node: &Node, out: &mut String) {
     }
 }
 
-fn format_list(parts: &[Node], out: &mut String, indent: usize) {
-    for (i, part) in parts.iter().enumerate() {
-        if let Node::Operator { op } = part {
-            // Check if previous command ended with heredoc — use newline separator
-            // The heredoc body already emits a trailing \n, so just add one more
-            if op == ";" && i > 0 && has_heredoc_redirect_deep(&parts[i - 1]) {
-                out.push('\n');
-            } else {
-                match op.as_str() {
-                    "&&" => out.push_str(" && "),
-                    "||" => out.push_str(" || "),
-                    ";" => out.push_str("; "),
-                    "&" => out.push_str(" & "),
-                    _ => out.push_str(op),
+fn format_list(items: &[ListItem], out: &mut String, indent: usize) {
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            // Write the operator from the *previous* item
+            if let Some(op) = items[i - 1].operator {
+                let has_heredoc = has_heredoc_redirect_deep(&items[i - 1].command);
+                if op == ListOperator::Semi && has_heredoc {
+                    out.push('\n');
+                } else {
+                    match op {
+                        ListOperator::And => out.push_str(" && "),
+                        ListOperator::Or => out.push_str(" || "),
+                        ListOperator::Semi => out.push_str("; "),
+                        ListOperator::Background => out.push_str(" & "),
+                    }
                 }
+            } else {
+                out.push_str("; ");
             }
-        } else if i > 0 && !matches!(parts.get(i - 1), Some(Node::Operator { .. })) {
-            out.push_str("; ");
-            format_node(part, out, indent);
-        } else {
-            format_node(part, out, indent);
         }
+        format_node(&item.command, out, indent);
     }
 }
 
 /// Check if a node (or its last sub-command) has heredoc redirects.
 fn has_heredoc_redirect_deep(node: &Node) -> bool {
-    match node {
-        Node::Command { redirects, .. } => {
-            redirects.iter().any(|r| matches!(r, Node::HereDoc { .. }))
+    match &node.kind {
+        NodeKind::Command { redirects, .. } => redirects
+            .iter()
+            .any(|r| matches!(r.kind, NodeKind::HereDoc { .. })),
+        NodeKind::Pipeline { commands, .. } => {
+            commands.last().is_some_and(has_heredoc_redirect_deep)
         }
-        Node::Pipeline { commands } => commands.last().is_some_and(has_heredoc_redirect_deep),
         _ => false,
     }
 }
@@ -417,7 +407,7 @@ fn format_for(var: &str, words: Option<&[Node]>, body: &Node, out: &mut String, 
         out.push_str(" in");
         for w in ws {
             out.push(' ');
-            if let Node::Word { value, .. } = w {
+            if let NodeKind::Word { value, .. } = &w.kind {
                 out.push_str(value);
             }
         }
@@ -440,7 +430,7 @@ fn format_case(
     indent: usize,
 ) {
     out.push_str("case ");
-    if let Node::Word { value, .. } = word {
+    if let NodeKind::Word { value, .. } = &word.kind {
         out.push_str(value);
     }
     out.push_str(" in ");
@@ -453,7 +443,7 @@ fn format_case(
             if j > 0 {
                 out.push_str(" | ");
             }
-            if let Node::Word { value, .. } = pw {
+            if let NodeKind::Word { value, .. } = &pw.kind {
                 out.push_str(value);
             }
         }
@@ -476,7 +466,7 @@ fn format_case(
 }
 
 fn format_function_body(body: &Node, out: &mut String, indent: usize) {
-    if let Node::BraceGroup { body: inner, .. } = body {
+    if let NodeKind::BraceGroup { body: inner, .. } = &body.kind {
         out.push_str("{ \n");
         indent_str(out, indent + 4);
         format_node(inner, out, indent + 4);
@@ -490,37 +480,37 @@ fn format_function_body(body: &Node, out: &mut String, indent: usize) {
 
 /// Formats a conditional expression node as canonical bash source.
 fn format_cond_node(node: &Node, out: &mut String) {
-    match node {
-        Node::UnaryTest { op, operand } => {
+    match &node.kind {
+        NodeKind::UnaryTest { op, operand } => {
             out.push_str(op);
             out.push(' ');
             format_cond_node(operand, out);
         }
-        Node::BinaryTest { op, left, right } => {
+        NodeKind::BinaryTest { op, left, right } => {
             format_cond_node(left, out);
             out.push(' ');
             out.push_str(op);
             out.push(' ');
             format_cond_node(right, out);
         }
-        Node::CondAnd { left, right } => {
+        NodeKind::CondAnd { left, right } => {
             format_cond_node(left, out);
             out.push_str(" && ");
             format_cond_node(right, out);
         }
-        Node::CondOr { left, right } => {
+        NodeKind::CondOr { left, right } => {
             format_cond_node(left, out);
             out.push_str(" || ");
             format_cond_node(right, out);
         }
-        Node::CondNot { operand } => {
+        NodeKind::CondNot { operand } => {
             out.push_str("! ");
             format_cond_node(operand, out);
         }
-        Node::CondTerm { value } => {
+        NodeKind::CondTerm { value } => {
             out.push_str(value);
         }
-        Node::CondParen { inner } => {
+        NodeKind::CondParen { inner } => {
             out.push_str("( ");
             format_cond_node(inner, out);
             out.push_str(" )");

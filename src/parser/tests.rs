@@ -1,4 +1,5 @@
 use super::*;
+use crate::ast::{ListOperator, PipeSep};
 
 #[allow(clippy::unwrap_used)]
 fn parse(source: &str) -> Vec<Node> {
@@ -191,4 +192,76 @@ fn line_continuation() {
     assert_eq!(nodes.len(), 1);
     let output = format!("{}", nodes[0]);
     assert_eq!(output, r#"(command (word "echo") (word "hello"))"#);
+}
+
+#[test]
+fn command_has_assignments_field() {
+    // The lexer doesn't currently produce AssignmentWord tokens,
+    // so assignments stay in words. This test verifies the
+    // Command variant has the assignments field and S-expression
+    // output is unchanged.
+    let nodes = parse("FOO=bar cmd arg");
+    assert_eq!(nodes.len(), 1);
+    assert!(matches!(
+        &nodes[0].kind,
+        NodeKind::Command { assignments, words, .. }
+        if assignments.is_empty() && words.len() == 3
+    ));
+    let output = format!("{}", nodes[0]);
+    assert_eq!(
+        output,
+        r#"(command (word "FOO=bar") (word "cmd") (word "arg"))"#
+    );
+}
+
+#[test]
+fn list_items_structured() {
+    let nodes = parse("a && b; c");
+    assert_eq!(nodes.len(), 1);
+    let NodeKind::List { items } = &nodes[0].kind else {
+        unreachable!("expected List");
+    };
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].operator, Some(ListOperator::Semi));
+    assert_eq!(items[1].operator, None);
+    let NodeKind::List { items: inner } = &items[0].command.kind else {
+        unreachable!("expected inner List");
+    };
+    assert_eq!(inner.len(), 2);
+    assert_eq!(inner[0].operator, Some(ListOperator::And));
+    assert_eq!(inner[1].operator, None);
+}
+
+#[test]
+fn pipeline_separators() {
+    let nodes = parse("a | b");
+    assert_eq!(nodes.len(), 1);
+    let NodeKind::Pipeline {
+        commands,
+        separators,
+    } = &nodes[0].kind
+    else {
+        unreachable!("expected Pipeline");
+    };
+    assert_eq!(commands.len(), 2);
+    assert_eq!(separators.len(), 1);
+    assert_eq!(separators[0], PipeSep::Pipe);
+}
+
+#[test]
+fn source_text_on_synthetic_node() {
+    let nodes = parse("echo hello");
+    // Nodes currently have empty spans (no real span tracking yet)
+    assert_eq!(nodes[0].source_text("echo hello"), "");
+}
+
+#[test]
+fn list_trailing_background() {
+    let nodes = parse("cmd &");
+    assert_eq!(nodes.len(), 1);
+    let NodeKind::List { items } = &nodes[0].kind else {
+        unreachable!("expected List");
+    };
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].operator, Some(ListOperator::Background));
 }

@@ -3,11 +3,18 @@ pub(crate) mod word;
 
 use std::fmt;
 
-use crate::ast::{CasePattern, Node};
+use crate::ast::{CasePattern, ListItem, ListOperator, Node, NodeKind};
+
+/// `Node` delegates `Display` to its inner `NodeKind`.
+impl fmt::Display for Node {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.kind.fmt(f)
+    }
+}
 
 /// Dispatch formatting to type-specific helpers, keeping the match arms short.
 #[allow(clippy::too_many_lines, clippy::match_same_arms)]
-impl fmt::Display for Node {
+impl fmt::Display for NodeKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Word { value, .. } => {
@@ -15,12 +22,14 @@ impl fmt::Display for Node {
                 word::write_word_value(f, value)?;
                 write!(f, "\")")
             }
-            Self::Command { words, redirects } => write_spaced(f, "(command", words, redirects),
-            Self::Pipeline { commands } => write_pipeline(f, commands),
-            Self::List { parts } => write_list(f, parts),
-            Self::Operator { op } => write!(f, "{}", operator_name(op)),
+            Self::Command {
+                assignments,
+                words,
+                redirects,
+            } => write_spaced3(f, "(command", assignments, words, redirects),
+            Self::Pipeline { commands, .. } => write_pipeline(f, commands),
+            Self::List { items } => write_list(f, items),
             Self::Empty => write!(f, "(command)"),
-            Self::PipeBoth => Ok(()),
             Self::Comment { text } => write!(f, "(comment \"{text}\")"),
 
             // Compound commands
@@ -582,17 +591,6 @@ fn read_hex(chars: &[char], pos: &mut usize, max: usize) -> u32 {
     val
 }
 
-fn operator_name(op: &str) -> &str {
-    match op {
-        "&&" => "and",
-        "||" => "or",
-        ";" | "\n" => "semi",
-        "&" => "background",
-        "|" => "pipe",
-        other => other,
-    }
-}
-
 /// Writes a single character with S-expression escaping.
 pub(super) fn write_escaped_char(f: &mut fmt::Formatter<'_>, ch: char) -> fmt::Result {
     match ch {
@@ -632,17 +630,21 @@ fn write_redirects(f: &mut fmt::Formatter<'_>, redirects: &[Node]) -> fmt::Resul
     Ok(())
 }
 
-fn write_spaced(
+fn write_spaced3(
     f: &mut fmt::Formatter<'_>,
     tag: &str,
     first: &[Node],
     second: &[Node],
+    third: &[Node],
 ) -> fmt::Result {
     write!(f, "{tag}")?;
     for n in first {
         write!(f, " {n}")?;
     }
     for n in second {
+        write!(f, " {n}")?;
+    }
+    for n in third {
         write!(f, " {n}")?;
     }
     write!(f, ")")
@@ -658,17 +660,13 @@ fn write_tagged_list(f: &mut fmt::Formatter<'_>, tag: &str, items: &[Node]) -> f
 
 /// Pipelines are right-nested: `(pipe a (pipe b c))`.
 fn write_pipeline(f: &mut fmt::Formatter<'_>, commands: &[Node]) -> fmt::Result {
-    let filtered: Vec<_> = commands
-        .iter()
-        .filter(|c| !matches!(c, Node::PipeBoth))
-        .collect();
-    if filtered.len() == 1 {
-        return write!(f, "{}", filtered[0]);
+    if commands.len() == 1 {
+        return write!(f, "{}", commands[0]);
     }
     // Group commands with their trailing redirects
     let mut groups: Vec<Vec<&Node>> = Vec::new();
-    for cmd in &filtered {
-        if matches!(cmd, Node::Redirect { .. }) {
+    for cmd in commands {
+        if matches!(cmd.kind, NodeKind::Redirect { .. }) {
             // Attach redirect to the previous group
             if let Some(last) = groups.last_mut() {
                 last.push(cmd);
@@ -713,30 +711,23 @@ fn write_pipeline_groups(
 }
 
 /// Lists use left-associative nesting: `(and (and a b) c)`.
-fn write_list(f: &mut fmt::Formatter<'_>, parts: &[Node]) -> fmt::Result {
-    if parts.len() == 1 {
-        return write!(f, "{}", parts[0]);
+fn write_list(f: &mut fmt::Formatter<'_>, items: &[ListItem]) -> fmt::Result {
+    if items.len() == 1 && items[0].operator.is_none() {
+        return write!(f, "{}", items[0].command);
     }
-    let mut items: Vec<&Node> = Vec::new();
-    let mut ops: Vec<&str> = Vec::new();
-    for part in parts {
-        if let Node::Operator { op } = part {
-            ops.push(op);
-        } else {
-            items.push(part);
-        }
-    }
-    if items.len() == 1 && ops.is_empty() {
-        return write!(f, "{}", items[0]);
-    }
-    // Left-associative: build from left to right
-    write_list_left_assoc(f, &items, &ops)
+    let cmds: Vec<&Node> = items.iter().map(|i| &i.command).collect();
+    let ops: Vec<ListOperator> = items.iter().filter_map(|i| i.operator).collect();
+    write_list_left_assoc(f, &cmds, &ops)
 }
 
-fn write_list_left_assoc(f: &mut fmt::Formatter<'_>, items: &[&Node], ops: &[&str]) -> fmt::Result {
+fn write_list_left_assoc(
+    f: &mut fmt::Formatter<'_>,
+    items: &[&Node],
+    ops: &[ListOperator],
+) -> fmt::Result {
     // Handle trailing unary operator (e.g., "cmd &" → "(background cmd)")
     if items.len() == 1 && ops.len() == 1 {
-        let sexp_op = operator_name(ops[0]);
+        let sexp_op = list_op_name(ops[0]);
         return write!(f, "({sexp_op} {})", items[0]);
     }
     if items.len() <= 1 && ops.is_empty() {
@@ -748,23 +739,30 @@ fn write_list_left_assoc(f: &mut fmt::Formatter<'_>, items: &[&Node], ops: &[&st
 
     // For a trailing background operator with no RHS
     if items.len() == ops.len() {
-        // Last op is trailing (e.g., "cmd &")
-        let sexp_op = operator_name(ops[ops.len() - 1]);
+        let sexp_op = list_op_name(ops[ops.len() - 1]);
         write!(f, "({sexp_op} ")?;
-        write_list_left_assoc(f, &items[..items.len()], &ops[..ops.len() - 1])?;
+        write_list_left_assoc(f, items, &ops[..ops.len() - 1])?;
         return write!(f, ")");
     }
 
     // Write left-associatively: ((op1 a b) op2 c) op3 d) ...
-    // Open all the parens first, then close them
     for i in (1..ops.len()).rev() {
-        write!(f, "({} ", operator_name(ops[i]))?;
+        write!(f, "({} ", list_op_name(ops[i]))?;
     }
-    write!(f, "({} {} {})", operator_name(ops[0]), items[0], items[1])?;
+    write!(f, "({} {} {})", list_op_name(ops[0]), items[0], items[1])?;
     for i in 1..ops.len() {
         write!(f, " {})", items[i + 1])?;
     }
     Ok(())
+}
+
+const fn list_op_name(op: ListOperator) -> &'static str {
+    match op {
+        ListOperator::And => "and",
+        ListOperator::Or => "or",
+        ListOperator::Semi => "semi",
+        ListOperator::Background => "background",
+    }
 }
 
 /// Writes a word list wrapped in `(in ...)` for `for`/`select` statements.
@@ -781,7 +779,7 @@ fn write_in_list(f: &mut fmt::Formatter<'_>, words: Option<&[Node]>) -> fmt::Res
 
 fn write_redirect(f: &mut fmt::Formatter<'_>, op: &str, target: &Node, _fd: i32) -> fmt::Result {
     write!(f, "(redirect \"{op}\" ")?;
-    if let Node::Word { value, .. } = target {
+    if let NodeKind::Word { value, .. } = &target.kind {
         // For fd dup operations (>&, <&), bare digit-only targets are unquoted
         let is_fd_op =
             op.starts_with(">&") || op.starts_with("<&") || op.ends_with("&-") || op.ends_with('&');

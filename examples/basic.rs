@@ -4,7 +4,7 @@
 
 #![allow(clippy::expect_used)]
 
-use rable::{Node, parse};
+use rable::{NodeKind, parse};
 
 fn main() {
     // Parse a simple pipeline
@@ -16,14 +16,17 @@ fn main() {
     println!();
 
     // Inspect the AST
-    if let Node::Pipeline { commands } = &nodes[0] {
+    if let NodeKind::Pipeline { commands, .. } = &nodes[0].kind {
         println!("Pipeline with {} commands:", commands.len());
         for (i, cmd) in commands.iter().enumerate() {
-            if let Node::Command { words, redirects } = cmd {
+            if let NodeKind::Command {
+                words, redirects, ..
+            } = &cmd.kind
+            {
                 let word_values: Vec<_> = words
                     .iter()
                     .filter_map(|w| {
-                        if let Node::Word { value, .. } = w {
+                        if let NodeKind::Word { value, .. } = &w.kind {
                             Some(value.as_str())
                         } else {
                             None
