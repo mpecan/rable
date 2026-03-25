@@ -36,15 +36,19 @@ pub(super) fn is_fd_number(s: &str) -> bool {
 }
 
 /// Returns true if the string is a variable fd reference like `{varname}`.
+/// Requires valid bash variable name: starts with letter or `_`, then
+/// alphanumeric or `_`.
 pub(super) fn is_varfd(s: &str) -> bool {
     s.starts_with('{')
         && s.ends_with('}')
         && s.len() >= 3
+        // First char must be letter or underscore (valid variable name start)
+        && s.as_bytes()
+            .get(1)
+            .is_some_and(|&c| c.is_ascii_alphabetic() || c == b'_')
         && s[1..s.len() - 1]
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        // Must contain at least one letter (not just digits — {4} is not a varfd)
-        && s[1..s.len() - 1].chars().any(|c| c.is_ascii_alphabetic() || c == '_')
 }
 
 /// Returns true if the string is a conditional binary operator.

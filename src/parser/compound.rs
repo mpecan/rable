@@ -498,6 +498,42 @@ impl Parser {
 
         let first_tok = self.lexer.next_token()?;
         self.lexer.set_command_start();
+
+        // If first token after coproc is a redirect operator, parse as
+        // a command with redirects (no name, no command word)
+        if matches!(
+            first_tok.kind,
+            TokenType::Less
+                | TokenType::Greater
+                | TokenType::DoubleGreater
+                | TokenType::LessAnd
+                | TokenType::GreaterAnd
+                | TokenType::LessGreater
+                | TokenType::GreaterPipe
+                | TokenType::AndGreater
+                | TokenType::AndDoubleGreater
+                | TokenType::DoubleLess
+                | TokenType::DoubleLessDash
+                | TokenType::TripleLess
+        ) {
+            let mut redirects = vec![self.build_redirect(first_tok, -1)?];
+            redirects.extend(self.parse_trailing_redirects()?);
+            return Ok(self.spanned(
+                start,
+                NodeKind::Coproc {
+                    name: None,
+                    command: Box::new(self.spanned(
+                        start,
+                        NodeKind::Command {
+                            assignments: Vec::new(),
+                            words: Vec::new(),
+                            redirects,
+                        },
+                    )),
+                },
+            ));
+        }
+
         let next = self.lexer.peek_token()?;
         let name = if next.kind.starts_command()
             && !matches!(

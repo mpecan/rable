@@ -370,6 +370,11 @@ pub(crate) fn process_ansi_c_content(chars: &[char], pos: &mut usize) -> String 
                         // High bytes are invalid standalone UTF-8 — replacement char
                         out.push('\u{FFFD}');
                     } else if let Some(ch) = char::from_u32(hex) {
+                        // Bash prefixes CTLESC (0x01) and CTLNUL (0x7F) with
+                        // CTLESC in its internal representation
+                        if ch == '\x01' || ch == '\x7F' {
+                            out.push('\x01');
+                        }
                         out.push(ch);
                     }
                 }
@@ -440,6 +445,9 @@ pub(crate) fn process_ansi_c_content(chars: &[char], pos: &mut usize) -> String 
                         return out;
                     }
                     if let Some(ch) = char::from_u32(val) {
+                        if ch == '\x01' || ch == '\x7F' {
+                            out.push('\x01');
+                        }
                         out.push(ch);
                     }
                 }

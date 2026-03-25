@@ -38,6 +38,7 @@ impl Lexer {
             // Read a line
             let mut line = String::new();
             let mut prev_backslash = false;
+            let mut eof_after_backslash = false;
             while let Some(c) = self.peek_char() {
                 self.advance_char();
                 if c == '\n' {
@@ -49,8 +50,16 @@ impl Lexer {
                     prev_backslash = false;
                     continue;
                 }
-                prev_backslash = c == '\\' && !prev_backslash;
-                line.push(c);
+                if c == '\\' && !prev_backslash && self.peek_char().is_none() {
+                    // Trailing \ at EOF — treat as literal \\
+                    line.push('\\');
+                    line.push('\\');
+                    prev_backslash = false;
+                    eof_after_backslash = true;
+                } else {
+                    prev_backslash = c == '\\' && !prev_backslash;
+                    line.push(c);
+                }
             }
             // Check if this line matches the delimiter
             let check_line = if strip_tabs {
@@ -58,7 +67,9 @@ impl Lexer {
             } else {
                 &line
             };
-            if check_line == delimiter {
+            // Match delimiter exactly, or with trailing whitespace
+            // (bash allows trailing spaces on the delimiter line)
+            if check_line == delimiter || check_line.trim_end() == delimiter {
                 break;
             }
             if strip_tabs {
@@ -66,7 +77,10 @@ impl Lexer {
             } else {
                 content.push_str(&line);
             }
-            content.push('\n');
+            // Trailing \ at EOF consumes the implicit newline
+            if !eof_after_backslash {
+                content.push('\n');
+            }
         }
         content
     }

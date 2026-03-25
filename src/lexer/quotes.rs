@@ -81,6 +81,8 @@ impl Lexer {
                         wb.push('\\');
                         if let Some(next) = self.advance_char() {
                             wb.push(next);
+                        } else {
+                            wb.push('\\');
                         }
                     }
                 }
