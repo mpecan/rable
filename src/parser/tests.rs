@@ -286,6 +286,119 @@ fn source_text_synthetic_node_empty() {
 }
 
 #[test]
+fn source_text_span_past_source_end() {
+    use crate::ast::Span;
+    // Span that starts beyond source length
+    let node = crate::ast::Node::new(NodeKind::Empty, Span::new(100, 200));
+    assert_eq!(node.source_text("short"), "");
+}
+
+#[test]
+fn source_text_multibyte_utf8() {
+    // Source with multi-byte characters: "é" is 2 bytes but 1 char
+    let source = "echo café";
+    let nodes = parse(source);
+    assert_eq!(nodes[0].source_text(source), "echo café");
+    let NodeKind::Command { words, .. } = &nodes[0].kind else {
+        unreachable!("expected Command");
+    };
+    assert_eq!(words[0].source_text(source), "echo");
+    assert_eq!(words[1].source_text(source), "café");
+}
+
+#[test]
+fn source_text_if_compound() {
+    let source = "if true; then echo yes; fi";
+    let nodes = parse(source);
+    assert_eq!(nodes[0].source_text(source), source);
+    assert!(matches!(nodes[0].kind, NodeKind::If { .. }));
+}
+
+#[test]
+fn source_text_while_compound() {
+    let source = "while true; do echo x; done";
+    let nodes = parse(source);
+    assert_eq!(nodes[0].source_text(source), source);
+    assert!(matches!(nodes[0].kind, NodeKind::While { .. }));
+}
+
+#[test]
+fn source_text_for_loop() {
+    let source = "for x in a b c; do echo $x; done";
+    let nodes = parse(source);
+    assert_eq!(nodes[0].source_text(source), source);
+    assert!(matches!(nodes[0].kind, NodeKind::For { .. }));
+}
+
+#[test]
+fn source_text_case_statement() {
+    let source = "case $x in a) echo a;; esac";
+    let nodes = parse(source);
+    assert_eq!(nodes[0].source_text(source), source);
+    assert!(matches!(nodes[0].kind, NodeKind::Case { .. }));
+}
+
+#[test]
+fn source_text_function_def() {
+    let source = "function foo { echo bar; }";
+    let nodes = parse(source);
+    assert_eq!(nodes[0].source_text(source), source);
+    assert!(matches!(nodes[0].kind, NodeKind::Function { .. }));
+}
+
+#[test]
+fn source_text_subshell() {
+    let source = "(echo hello)";
+    let nodes = parse(source);
+    assert_eq!(nodes[0].source_text(source), source);
+    assert!(matches!(nodes[0].kind, NodeKind::Subshell { .. }));
+}
+
+#[test]
+fn source_text_brace_group() {
+    let source = "{ echo hello; }";
+    let nodes = parse(source);
+    assert_eq!(nodes[0].source_text(source), source);
+    assert!(matches!(nodes[0].kind, NodeKind::BraceGroup { .. }));
+}
+
+#[test]
+fn source_text_conditional_expr() {
+    let source = "[[ -f file ]]";
+    let nodes = parse(source);
+    assert_eq!(nodes[0].source_text(source), source);
+    assert!(matches!(nodes[0].kind, NodeKind::ConditionalExpr { .. }));
+}
+
+#[test]
+fn source_text_negation() {
+    let source = "! true";
+    let nodes = parse(source);
+    assert_eq!(nodes[0].source_text(source), source);
+    assert!(matches!(nodes[0].kind, NodeKind::Negation { .. }));
+}
+
+#[test]
+fn source_text_redirect() {
+    let source = "echo hello > file.txt";
+    let nodes = parse(source);
+    let NodeKind::Command { redirects, .. } = &nodes[0].kind else {
+        unreachable!("expected Command");
+    };
+    assert_eq!(redirects.len(), 1);
+    assert_eq!(redirects[0].source_text(source), "> file.txt");
+}
+
+#[test]
+fn source_text_multiline() {
+    let source = "echo a\necho b";
+    let nodes = parse(source);
+    assert_eq!(nodes.len(), 2);
+    assert_eq!(nodes[0].source_text(source), "echo a");
+    assert_eq!(nodes[1].source_text(source), "echo b");
+}
+
+#[test]
 fn list_trailing_background() {
     let nodes = parse("cmd &");
     assert_eq!(nodes.len(), 1);
