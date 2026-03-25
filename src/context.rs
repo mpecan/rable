@@ -115,47 +115,6 @@ pub fn skip_backtick(chars: &[char], pos: &mut usize, out: &mut String) {
     }
 }
 
-/// Reads balanced delimiters (parens, braces, etc.) with quote awareness.
-///
-/// Starting at depth 1, reads until depth reaches 0. Handles single quotes,
-/// double quotes, backticks, and backslash escapes inside.
-pub fn read_balanced_delim(
-    chars: &[char],
-    pos: &mut usize,
-    open: char,
-    close: char,
-    out: &mut String,
-) {
-    let mut depth = 1;
-    while *pos < chars.len() && depth > 0 {
-        match chars[*pos] {
-            c if c == open => {
-                depth += 1;
-                out.push(c);
-                *pos += 1;
-            }
-            c if c == close => {
-                depth -= 1;
-                out.push(c);
-                *pos += 1;
-            }
-            '\'' => skip_single_quoted(chars, pos, out),
-            '"' => skip_double_quoted(chars, pos, out),
-            '`' => skip_backtick(chars, pos, out),
-            '\\' if *pos + 1 < chars.len() => {
-                out.push(chars[*pos]);
-                *pos += 1;
-                out.push(chars[*pos]);
-                *pos += 1;
-            }
-            c => {
-                out.push(c);
-                *pos += 1;
-            }
-        }
-    }
-}
-
 /// Counts consecutive backslashes before a position to determine
 /// if a character is escaped.
 ///

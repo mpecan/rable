@@ -17,11 +17,17 @@ impl fmt::Display for Node {
 impl fmt::Display for NodeKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Word { value, .. } => {
+            Self::Word { value, spans, .. } => {
                 write!(f, "(word \"")?;
-                word::write_word_value(f, value)?;
+                if !spans.is_empty() && !word::needs_value_path(value) {
+                    let segments = word::segments_from_spans(value, spans);
+                    word::write_word_segments(f, &segments)?;
+                } else {
+                    word::write_word_value(f, value)?;
+                }
                 write!(f, "\")")
             }
+            Self::WordLiteral { value } => write!(f, "{value}"),
             Self::Command {
                 assignments,
                 words,

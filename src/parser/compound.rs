@@ -153,8 +153,9 @@ impl Parser {
             Some(ws)
         } else {
             Some(vec![Node::empty(NodeKind::Word {
+                parts: super::word_parts::decompose_word("\"$@\""),
                 value: "\"$@\"".to_string(),
-                parts: Vec::new(),
+                spans: Vec::new(),
             })])
         };
 
@@ -241,8 +242,9 @@ impl Parser {
         let word_tok = self.lexer.next_token()?;
         let word = Box::new(Node::new(
             NodeKind::Word {
+                parts: super::word_parts::decompose_word(&word_tok.value),
                 value: word_tok.value.clone(),
-                parts: Vec::new(),
+                spans: word_tok.spans,
             },
             Span::new(word_tok.pos, word_tok.pos + word_tok.value.len()),
         ));

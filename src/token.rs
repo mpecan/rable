@@ -141,6 +141,8 @@ impl TokenType {
     }
 }
 
+use crate::lexer::word_builder::WordSpan;
+
 /// A token produced by the lexer.
 #[derive(Debug, Clone)]
 pub struct Token {
@@ -148,6 +150,9 @@ pub struct Token {
     pub value: String,
     pub pos: usize,
     pub line: usize,
+    /// Expansion spans within the word value (empty for non-word tokens).
+    #[allow(dead_code)]
+    pub(crate) spans: Vec<WordSpan>,
 }
 
 impl Token {
@@ -157,6 +162,25 @@ impl Token {
             value: value.into(),
             pos,
             line,
+            spans: Vec::new(),
+        }
+    }
+
+    /// Creates a word token with pre-recorded expansion spans.
+    #[allow(dead_code)]
+    pub(crate) const fn with_spans(
+        kind: TokenType,
+        value: String,
+        pos: usize,
+        line: usize,
+        spans: Vec<WordSpan>,
+    ) -> Self {
+        Self {
+            kind,
+            value,
+            pos,
+            line,
+            spans,
         }
     }
 
@@ -171,6 +195,7 @@ impl Token {
             value: String::new(),
             pos,
             line,
+            spans: Vec::new(),
         }
     }
 }

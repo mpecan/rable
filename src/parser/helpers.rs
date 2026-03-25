@@ -2,11 +2,12 @@
 
 use crate::ast::{Node, NodeKind};
 
-/// Creates a `Word` node with no parts.
+/// Creates a `Word` node with decomposed parts.
 pub fn word_node(value: &str) -> Node {
     Node::empty(NodeKind::Word {
+        parts: super::word_parts::decompose_word(value),
         value: value.to_string(),
-        parts: Vec::new(),
+        spans: Vec::new(),
     })
 }
 
@@ -77,7 +78,10 @@ pub(super) fn make_stderr_redirect() -> Node {
         op: ">&".to_string(),
         target: Box::new(Node::empty(NodeKind::Word {
             value: "1".to_string(),
-            parts: Vec::new(),
+            parts: vec![Node::empty(NodeKind::WordLiteral {
+                value: "1".to_string(),
+            })],
+            spans: Vec::new(),
         })),
         fd: 2,
     })

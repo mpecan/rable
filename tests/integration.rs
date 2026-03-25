@@ -242,18 +242,26 @@ fn oracle_test_suite() {
         let mut pass = 0;
         let mut fail = 0;
 
+        let mut failures = Vec::new();
         for case in &cases {
-            let (passed, _actual) = run_test(case);
+            let (passed, actual) = run_test(case);
             if passed {
                 pass += 1;
             } else {
                 fail += 1;
+                failures.push(format!(
+                    "    FAIL :: {}\n      input:    {:?}\n      expected: {:?}\n      actual:   {:?}",
+                    case.name, case.input, case.expected, actual,
+                ));
             }
         }
 
         let total = pass + fail;
         let status = if fail == 0 { "OK" } else { "FAIL" };
         eprintln!("  {file_name}: {pass}/{total} passed [{status}]");
+        for f in &failures {
+            eprintln!("{f}");
+        }
         total_pass += pass;
         total_fail += fail;
     }

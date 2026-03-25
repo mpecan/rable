@@ -1,6 +1,7 @@
 mod compound;
 mod conditional;
 pub mod helpers;
+mod word_parts;
 
 use crate::ast::{ListItem, ListOperator, Node, NodeKind, PipeSep, Span};
 use crate::error::{RableError, Result};
@@ -567,10 +568,12 @@ impl Parser {
                             return self.parse_function_def(&tok);
                         }
                         let word_span = Span::new(tok.pos, tok.pos + tok.value.len());
+                        let parts = word_parts::decompose_word(&tok.value);
                         let node = Node::new(
                             NodeKind::Word {
                                 value: tok.value,
-                                parts: Vec::new(),
+                                parts,
+                                spans: tok.spans,
                             },
                             word_span,
                         );

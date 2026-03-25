@@ -72,7 +72,15 @@ impl Node {
 #[allow(clippy::use_self)]
 pub enum NodeKind {
     /// A word token, possibly containing expansion parts.
-    Word { value: String, parts: Vec<Node> },
+    Word {
+        value: String,
+        parts: Vec<Node>,
+        #[allow(dead_code)]
+        spans: Vec<crate::lexer::word_builder::WordSpan>,
+    },
+
+    /// A literal text segment within a word's parts list.
+    WordLiteral { value: String },
 
     /// A simple command: assignments, words, and redirects.
     Command {
