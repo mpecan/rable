@@ -199,9 +199,77 @@ parable_tests! {
     parable_35_parser_bugs          => "35_parser_bugs.tests",
 }
 
+/// Known oracle test failures — tests that don't match bash-oracle output yet.
+/// When a fix makes one of these pass, the test suite will fail with
+/// "NEWLY PASSING" so you know to remove it from this list.
+const KNOWN_ORACLE_FAILURES: &[&str] = &[
+    // Trailing backslash doubling
+    "ansi_c_escapes 3",
+    "redirect_formatting 3",
+    "heredoc_formatting 1",
+    // ANSI-C \x single hex digit and \0 octal repeat behavior
+    "ansi_c_escapes 13",
+    "other 10",
+    // Heredoc delimiter edge cases
+    "ansi_c_escapes 18",
+    "heredoc_formatting 8",
+    // Varfd {6d} not recognized → word dropped
+    "heredoc_formatting 9",
+    // Coproc with adjacent redirect
+    "redirect_formatting 7",
+    // Background & placement after heredoc in cmdsub
+    "cmdsub_formatting 9",
+    // Deprecated $[...] with ; splits word
+    "word_boundaries 8",
+    // Assignment detection causes esac to be keyword
+    "word_boundaries 2",
+];
+
+struct OracleResults {
+    total_pass: usize,
+    total_fail: usize,
+    regressions: Vec<String>,
+    newly_passing: Vec<String>,
+}
+
+fn run_oracle_file(path: &Path, results: &mut OracleResults) {
+    let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+    let content = fs::read_to_string(path).unwrap_or_default();
+    let cases = parse_test_file(&content);
+    let mut pass = 0;
+    let mut fail = 0;
+
+    for case in &cases {
+        let (passed, actual) = run_test(case);
+        let is_known = KNOWN_ORACLE_FAILURES.contains(&case.name.as_str());
+        if passed {
+            pass += 1;
+            if is_known {
+                results.newly_passing.push(format!(
+                    "  NEWLY PASSING :: {} — remove from KNOWN_ORACLE_FAILURES",
+                    case.name,
+                ));
+            }
+        } else {
+            fail += 1;
+            if !is_known {
+                results.regressions.push(format!(
+                    "  REGRESSION :: {}\n    input:    {:?}\n    expected: {:?}\n    actual:   {:?}",
+                    case.name, case.input, case.expected, actual,
+                ));
+            }
+        }
+    }
+
+    let total = pass + fail;
+    let status = if fail == 0 { "OK" } else { "FAIL" };
+    eprintln!("  {file_name}: {pass}/{total} passed [{status}]");
+    results.total_pass += pass;
+    results.total_fail += fail;
+}
+
 /// Oracle-derived tests: correctness differences found by fuzzing against bash-oracle.
-/// These tests track progress toward full bash compatibility beyond Parable's test suite.
-/// This test reports results but does NOT fail the build.
+/// Asserts that known failures still fail and known passes don't regress.
 #[test]
 fn oracle_test_suite() {
     let test_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/oracle");
@@ -213,8 +281,12 @@ fn oracle_test_suite() {
     eprintln!("\n=== Oracle Test Suite (bash-oracle compatibility) ===\n");
 
     let filter = std::env::var("RABLE_TEST").ok();
-    let mut total_pass = 0;
-    let mut total_fail = 0;
+    let mut results = OracleResults {
+        total_pass: 0,
+        total_fail: 0,
+        regressions: Vec::new(),
+        newly_passing: Vec::new(),
+    };
 
     let mut entries: Vec<_> = fs::read_dir(&test_dir)
         .unwrap_or_else(|_| {
@@ -229,44 +301,34 @@ fn oracle_test_suite() {
 
     for entry in entries {
         let path = entry.path();
-        let file_name = path.file_name().unwrap_or_default().to_string_lossy();
-
-        if let Some(ref f) = filter
-            && !file_name.contains(f.as_str())
-        {
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        if filter.as_ref().is_some_and(|f| !name.contains(f.as_str())) {
             continue;
         }
-
-        let content = fs::read_to_string(&path).unwrap_or_default();
-        let cases = parse_test_file(&content);
-        let mut pass = 0;
-        let mut fail = 0;
-
-        let mut failures = Vec::new();
-        for case in &cases {
-            let (passed, actual) = run_test(case);
-            if passed {
-                pass += 1;
-            } else {
-                fail += 1;
-                failures.push(format!(
-                    "    FAIL :: {}\n      input:    {:?}\n      expected: {:?}\n      actual:   {:?}",
-                    case.name, case.input, case.expected, actual,
-                ));
-            }
-        }
-
-        let total = pass + fail;
-        let status = if fail == 0 { "OK" } else { "FAIL" };
-        eprintln!("  {file_name}: {pass}/{total} passed [{status}]");
-        for f in &failures {
-            eprintln!("{f}");
-        }
-        total_pass += pass;
-        total_fail += fail;
+        run_oracle_file(&path, &mut results);
     }
 
-    let total = total_pass + total_fail;
-    eprintln!("\n=== Oracle Results: {total_pass}/{total} passed ({total_fail} remaining) ===\n");
-    // Intentionally does not assert — these are aspirational targets
+    let total = results.total_pass + results.total_fail;
+    eprintln!(
+        "\n=== Oracle Results: {}/{total} passed ({} remaining) ===\n",
+        results.total_pass, results.total_fail
+    );
+
+    for msg in &results.newly_passing {
+        eprintln!("{msg}");
+    }
+    for msg in &results.regressions {
+        eprintln!("{msg}");
+    }
+
+    assert!(
+        results.regressions.is_empty(),
+        "{} oracle test regression(s)",
+        results.regressions.len()
+    );
+    assert!(
+        results.newly_passing.is_empty(),
+        "{} oracle test(s) newly passing — update KNOWN_ORACLE_FAILURES",
+        results.newly_passing.len()
+    );
 }
