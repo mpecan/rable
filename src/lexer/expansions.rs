@@ -46,7 +46,7 @@ impl Lexer {
             Some('[') => {
                 self.advance_char();
                 wb.push('[');
-                self.read_until_char(wb, ']')?;
+                self.read_deprecated_arith(wb)?;
                 wb.record(span_start, WordSpanKind::DeprecatedArith);
             }
             Some(c) if is_dollar_start(c) => {
@@ -168,6 +168,8 @@ impl Lexer {
                         wb.push('\\');
                         if let Some(c) = self.advance_char() {
                             wb.push(c);
+                        } else {
+                            wb.push('\\');
                         }
                     }
                 }
@@ -281,6 +283,8 @@ impl Lexer {
                         wb.push('\\');
                         if let Some(c) = self.advance_char() {
                             wb.push(c);
+                        } else {
+                            wb.push('\\');
                         }
                     }
                 }
@@ -345,18 +349,26 @@ impl Lexer {
         }
     }
 
-    /// Reads until the given closing character.
-    pub(super) fn read_until_char(&mut self, wb: &mut WordBuilder, close: char) -> Result<()> {
+    /// Reads deprecated `$[...]` arithmetic with bracket depth tracking.
+    fn read_deprecated_arith(&mut self, wb: &mut WordBuilder) -> Result<()> {
+        let mut depth = 1;
         loop {
             match self.advance_char() {
-                Some(c) if c == close => {
-                    wb.push(c);
-                    return Ok(());
+                Some('[') => {
+                    depth += 1;
+                    wb.push('[');
+                }
+                Some(']') => {
+                    depth -= 1;
+                    wb.push(']');
+                    if depth == 0 {
+                        return Ok(());
+                    }
                 }
                 Some(c) => wb.push(c),
                 None => {
                     return Err(RableError::matched_pair(
-                        format!("unterminated '{close}'"),
+                        "unterminated '$['",
                         self.pos,
                         self.line,
                     ));

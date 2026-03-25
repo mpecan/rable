@@ -129,6 +129,9 @@ impl Lexer {
                     wb.push('\\');
                     if let Some(next) = self.advance_char() {
                         wb.push(next);
+                    } else {
+                        // Trailing \ at EOF — bash keeps it as literal \\
+                        wb.push('\\');
                     }
                     wb.record(start, WordSpanKind::Escape);
                 }
@@ -364,13 +367,15 @@ fn is_assignment_word(value: &str) -> bool {
         match bytes[i] {
             b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' => i += 1,
             b'[' => {
-                // Skip subscript [...] (may be nested)
+                // Skip subscript [...] — reject if it contains whitespace
+                // (bash doesn't allow spaces in assignment subscripts)
                 i += 1;
                 let mut depth = 1;
                 while i < bytes.len() && depth > 0 {
                     match bytes[i] {
                         b'[' => depth += 1,
                         b']' => depth -= 1,
+                        b' ' | b'\t' | b'\n' => return false,
                         _ => {}
                     }
                     i += 1;

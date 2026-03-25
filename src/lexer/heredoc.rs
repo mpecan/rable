@@ -49,8 +49,15 @@ impl Lexer {
                     prev_backslash = false;
                     continue;
                 }
-                prev_backslash = c == '\\' && !prev_backslash;
-                line.push(c);
+                if c == '\\' && !prev_backslash && self.peek_char().is_none() {
+                    // Trailing \ at EOF — treat as literal \\
+                    line.push('\\');
+                    line.push('\\');
+                    prev_backslash = false;
+                } else {
+                    prev_backslash = c == '\\' && !prev_backslash;
+                    line.push(c);
+                }
             }
             // Check if this line matches the delimiter
             let check_line = if strip_tabs {

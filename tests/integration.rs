@@ -203,9 +203,7 @@ parable_tests! {
 /// When a fix makes one of these pass, the test suite will fail with
 /// "NEWLY PASSING" so you know to remove it from this list.
 const KNOWN_ORACLE_FAILURES: &[&str] = &[
-    // Trailing backslash doubling
-    "ansi_c_escapes 3",
-    "redirect_formatting 3",
+    // Trailing backslash in heredoc body
     "heredoc_formatting 1",
     // ANSI-C \x single hex digit and \0 octal repeat behavior
     "ansi_c_escapes 13",
@@ -213,16 +211,10 @@ const KNOWN_ORACLE_FAILURES: &[&str] = &[
     // Heredoc delimiter edge cases
     "ansi_c_escapes 18",
     "heredoc_formatting 8",
-    // Varfd {6d} not recognized → word dropped
-    "heredoc_formatting 9",
     // Coproc with adjacent redirect
     "redirect_formatting 7",
     // Background & placement after heredoc in cmdsub
     "cmdsub_formatting 9",
-    // Deprecated $[...] with ; splits word
-    "word_boundaries 8",
-    // Assignment detection causes esac to be keyword
-    "word_boundaries 2",
 ];
 
 #[derive(Default)]
