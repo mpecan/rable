@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.7](https://github.com/mpecan/rable/compare/rable-v0.1.6...rable-v0.1.7) (2026-03-25)
+
+
+### Features
+
+* populate source spans on all AST nodes ([0e32c37](https://github.com/mpecan/rable/commit/0e32c379607940bd8d083ca4670b04f8980dd443))
+* populate source spans on all AST nodes ([#8](https://github.com/mpecan/rable/issues/8)) ([a8c92e8](https://github.com/mpecan/rable/commit/a8c92e8dd6a8fe7425edd94fcc647492bc3cd32d))
+* populate source spans on all AST nodes ([#9](https://github.com/mpecan/rable/issues/9)) ([b8be160](https://github.com/mpecan/rable/commit/b8be160b4a397a552259c7bb72b07e9519f0df54))
+
 ## [0.1.6](https://github.com/mpecan/rable/compare/rable-v0.1.5...rable-v0.1.6) (2026-03-25)
 
 
