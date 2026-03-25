@@ -65,7 +65,9 @@ impl Lexer {
             } else {
                 &line
             };
-            if check_line == delimiter {
+            // Match delimiter exactly, or with trailing whitespace
+            // (bash allows trailing spaces on the delimiter line)
+            if check_line == delimiter || check_line.trim_end() == delimiter {
                 break;
             }
             if strip_tabs {

@@ -205,15 +205,10 @@ parable_tests! {
 const KNOWN_ORACLE_FAILURES: &[&str] = &[
     // Heredoc trailing \\ at EOF with extra trailing \n
     "heredoc_formatting 1",
-    // ANSI-C \x single hex digit and \0 octal repeat behavior
+    // ANSI-C control char doubling (bash-oracle serialization quirk)
     "ansi_c_escapes 13",
     "other 10",
-    // Heredoc delimiter edge cases
-    "ansi_c_escapes 18",
-    "heredoc_formatting 8",
-    // Coproc with adjacent redirect
-    "redirect_formatting 7",
-    // Background & placement after heredoc in cmdsub
+    // Trailing space before ) in cmdsub with background heredoc
     "cmdsub_formatting 9",
 ];
 
