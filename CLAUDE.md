@@ -21,19 +21,30 @@
 | Module | Responsibility |
 |---|---|
 | `src/lib.rs` | Library re-exports, public `parse()` entry point |
-| `src/error.rs` | `ParseError`, `MatchedPairError` via thiserror |
-| `src/token.rs` | `TokenType` enum, `Token` struct |
-| `src/lexer.rs` | Hand-written context-sensitive tokenizer |
-| `src/lexer_word.rs` | Word/expansion parsing (split for complexity) |
-| `src/lexer_matched.rs` | Matched pair parsing for nested constructs |
-| `src/ast.rs` | `Node` enum with all 50+ variants |
-| `src/sexp.rs` | S-expression output via Display trait |
-| `src/parser.rs` | Recursive descent parser (top-level) |
-| `src/parser_compound.rs` | Compound commands: if/while/for/case/select/coproc |
-| `src/parser_arith.rs` | Arithmetic expression parser |
-| `src/parser_cond.rs` | Conditional expression parser `[[ ]]` |
+| `src/ast.rs` | `Node` struct, `NodeKind` enum with 50+ variants, `Span` |
+| `src/token.rs` | `TokenType` enum (62 variants), `Token` struct |
+| `src/error.rs` | `RableError` (Parse / MatchedPair) via thiserror |
+| `src/context.rs` | Parsing context and state management |
+| `src/lexer/` | Hand-written context-sensitive tokenizer |
+| `src/lexer/quotes.rs` | Quote and escape handling |
+| `src/lexer/heredoc.rs` | Here-document processing |
+| `src/lexer/words.rs` | Word boundary detection |
+| `src/lexer/word_builder.rs` | Word assembly with segments |
+| `src/lexer/expansions.rs` | Parameter, command, arithmetic expansion parsing |
+| `src/lexer/operators.rs` | Operator recognition |
+| `src/parser/` | Recursive descent parser (top-level) |
+| `src/parser/compound.rs` | Compound commands: if/while/for/case/select/coproc |
+| `src/parser/conditional.rs` | Conditional expression parser `[[ ]]` |
+| `src/parser/helpers.rs` | Common parsing utilities |
+| `src/parser/word_parts.rs` | Word segment processing |
+| `src/sexp/` | S-expression output via Display trait |
+| `src/sexp/word.rs` | Word segment formatting |
+| `src/sexp/ansi_c.rs` | ANSI-C quoting escapes |
+| `src/format/` | Canonical bash reformatter (command substitution content) |
 | `src/python.rs` | PyO3 bindings (feature-gated) |
-| `tests/` | Integration tests using Parable's .tests format |
+| `tests/integration.rs` | Integration test runner for .tests files |
+| `tests/parable/` | Parable test corpus (36 files, 1,604 tests) |
+| `tests/oracle/` | bash-oracle compatibility tests (11 files) |
 
 ## Code Limits
 
@@ -75,3 +86,5 @@ bash source code
 ```
 
 Run with `cargo test`. The test runner reads `.tests` files, parses input, compares S-expression output.
+
+Oracle tests in `tests/oracle/` provide additional coverage from bash-oracle fuzzing. Run with `just test-oracle`.
