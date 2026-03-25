@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.6](https://github.com/mpecan/rable/compare/rable-v0.1.5...rable-v0.1.6) (2026-03-25)
+
+
+### Features
+
+* enrich AST with spans, structured lists, and pipe separators ([#7](https://github.com/mpecan/rable/issues/7)) ([53269b7](https://github.com/mpecan/rable/commit/53269b7b2de1c0bc7fe6dd49255509d638bc58ac))
+* enrich AST with spans, structured lists, pipe separators, and assignments ([7eec43e](https://github.com/mpecan/rable/commit/7eec43e4ecd415c0ca16ab36f6e5c79883bf6142))
+* improve Rust developer experience ([2ac7654](https://github.com/mpecan/rable/commit/2ac7654132f49eedddc62433e50195dc26b13b3f))
+
+
+### Bug Fixes
+
+* trailing list operators in format and assert on Parable compat failures ([3a98be1](https://github.com/mpecan/rable/commit/3a98be1ad1e7c4461974041d153edb41b253f506))
+
 ## [0.1.5](https://github.com/mpecan/rable/compare/rable-v0.1.4...rable-v0.1.5) (2026-03-24)
 
 
