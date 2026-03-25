@@ -38,6 +38,7 @@ impl Lexer {
             // Read a line
             let mut line = String::new();
             let mut prev_backslash = false;
+            let mut eof_after_backslash = false;
             while let Some(c) = self.peek_char() {
                 self.advance_char();
                 if c == '\n' {
@@ -54,6 +55,7 @@ impl Lexer {
                     line.push('\\');
                     line.push('\\');
                     prev_backslash = false;
+                    eof_after_backslash = true;
                 } else {
                     prev_backslash = c == '\\' && !prev_backslash;
                     line.push(c);
@@ -75,7 +77,10 @@ impl Lexer {
             } else {
                 content.push_str(&line);
             }
-            content.push('\n');
+            // Trailing \ at EOF consumes the implicit newline
+            if !eof_after_backslash {
+                content.push('\n');
+            }
         }
         content
     }

@@ -203,9 +203,11 @@ parable_tests! {
 /// When a fix makes one of these pass, the test suite will fail with
 /// "NEWLY PASSING" so you know to remove it from this list.
 const KNOWN_ORACLE_FAILURES: &[&str] = &[
-    // Heredoc trailing \\ at EOF with extra trailing \n
-    "heredoc_formatting 1",
-    // Trailing space before ) in cmdsub with background heredoc
+    // Cosmetic: bash adds a space before ) in $(cmd <<heredoc &\n...\n )
+    // but we produce $(cmd <<heredoc &\n...\n). The space is semantically
+    // irrelevant — $(cmd ) and $(cmd) are identical in bash. The space
+    // is an artifact of bash's internal parser boundary between heredoc
+    // content and the $(...) close delimiter.
     "cmdsub_formatting 9",
 ];
 
