@@ -205,9 +205,6 @@ parable_tests! {
 const KNOWN_ORACLE_FAILURES: &[&str] = &[
     // Heredoc trailing \\ at EOF with extra trailing \n
     "heredoc_formatting 1",
-    // ANSI-C control char doubling (bash-oracle serialization quirk)
-    "ansi_c_escapes 13",
-    "other 10",
     // Trailing space before ) in cmdsub with background heredoc
     "cmdsub_formatting 9",
 ];
