@@ -209,6 +209,7 @@ fn parable_test_suite() {
 
     let total = pass + fail;
     eprintln!("Pass rate: {pass}/{total}");
+    assert_eq!(fail, 0, "{fail} Parable compatibility tests failed");
 }
 
 /// Oracle-derived tests: correctness differences found by fuzzing against bash-oracle.

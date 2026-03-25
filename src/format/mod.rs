@@ -324,18 +324,26 @@ fn format_list(items: &[ListItem], out: &mut String, indent: usize) {
                 if op == ListOperator::Semi && has_heredoc {
                     out.push('\n');
                 } else {
-                    match op {
-                        ListOperator::And => out.push_str(" && "),
-                        ListOperator::Or => out.push_str(" || "),
-                        ListOperator::Semi => out.push_str("; "),
-                        ListOperator::Background => out.push_str(" & "),
-                    }
+                    format_list_op(op, out);
                 }
             } else {
                 out.push_str("; ");
             }
         }
         format_node(&item.command, out, indent);
+    }
+    // Write trailing operator on the last item (e.g., `cmd &`)
+    if let Some(op) = items.last().and_then(|last| last.operator) {
+        format_list_op(op, out);
+    }
+}
+
+fn format_list_op(op: ListOperator, out: &mut String) {
+    match op {
+        ListOperator::And => out.push_str(" && "),
+        ListOperator::Or => out.push_str(" || "),
+        ListOperator::Semi => out.push_str("; "),
+        ListOperator::Background => out.push_str(" & "),
     }
 }
 
