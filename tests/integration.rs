@@ -203,7 +203,7 @@ parable_tests! {
 /// When a fix makes one of these pass, the test suite will fail with
 /// "NEWLY PASSING" so you know to remove it from this list.
 const KNOWN_ORACLE_FAILURES: &[&str] = &[
-    // Trailing backslash in heredoc body
+    // Heredoc trailing \\ at EOF with extra trailing \n
     "heredoc_formatting 1",
     // ANSI-C \x single hex digit and \0 octal repeat behavior
     "ansi_c_escapes 13",
