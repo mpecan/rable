@@ -249,10 +249,40 @@ fn pipeline_separators() {
 }
 
 #[test]
-fn source_text_on_synthetic_node() {
-    let nodes = parse("echo hello");
-    // Nodes currently have empty spans (no real span tracking yet)
-    assert_eq!(nodes[0].source_text("echo hello"), "");
+fn source_text_simple_command() {
+    let source = "echo hello";
+    let nodes = parse(source);
+    assert_eq!(nodes[0].source_text(source), "echo hello");
+    let NodeKind::Command { words, .. } = &nodes[0].kind else {
+        unreachable!("expected Command");
+    };
+    assert_eq!(words[0].source_text(source), "echo");
+    assert_eq!(words[1].source_text(source), "hello");
+}
+
+#[test]
+fn source_text_pipeline() {
+    let source = "ls | grep foo";
+    let nodes = parse(source);
+    assert_eq!(nodes[0].source_text(source), "ls | grep foo");
+    let NodeKind::Pipeline { commands, .. } = &nodes[0].kind else {
+        unreachable!("expected Pipeline");
+    };
+    assert_eq!(commands[0].source_text(source), "ls");
+    assert_eq!(commands[1].source_text(source), "grep foo");
+}
+
+#[test]
+fn source_text_list() {
+    let source = "a && b";
+    let nodes = parse(source);
+    assert_eq!(nodes[0].source_text(source), "a && b");
+}
+
+#[test]
+fn source_text_synthetic_node_empty() {
+    let node = crate::ast::Node::empty(NodeKind::Empty);
+    assert_eq!(node.source_text("anything"), "");
 }
 
 #[test]

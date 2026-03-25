@@ -1,6 +1,6 @@
 //! Conditional expression parser for `[[ ... ]]`.
 
-use crate::ast::{Node, NodeKind};
+use crate::ast::{Node, NodeKind, Span};
 use crate::error::Result;
 use crate::token::{Token, TokenType};
 
@@ -11,6 +11,7 @@ use super::{
 
 impl Parser {
     pub(super) fn parse_cond_command(&mut self) -> Result<Node> {
+        let start = self.peek_pos()?;
         self.expect(TokenType::DoubleLeftBracket)?;
         self.lexer.enter_cond_expr();
 
@@ -20,10 +21,13 @@ impl Parser {
         self.expect_cond_close()?;
         let redirects = self.parse_trailing_redirects()?;
 
-        Ok(Node::empty(NodeKind::ConditionalExpr {
-            body: Box::new(body),
-            redirects,
-        }))
+        Ok(self.spanned(
+            start,
+            NodeKind::ConditionalExpr {
+                body: Box::new(body),
+                redirects,
+            },
+        ))
     }
 
     fn parse_cond_or(&mut self) -> Result<Node> {
@@ -31,10 +35,14 @@ impl Parser {
         while !self.is_cond_close()? && self.peek_is(TokenType::Or)? {
             self.lexer.next_token()?;
             let right = self.parse_cond_and()?;
-            left = Node::empty(NodeKind::CondOr {
-                left: Box::new(left),
-                right: Box::new(right),
-            });
+            let span = Span::new(left.span.start, right.span.end);
+            left = Node::new(
+                NodeKind::CondOr {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span,
+            );
         }
         Ok(left)
     }
@@ -44,15 +52,21 @@ impl Parser {
         while !self.is_cond_close()? && self.peek_is(TokenType::And)? {
             self.lexer.next_token()?;
             let right = self.parse_cond_primary()?;
-            left = Node::empty(NodeKind::CondAnd {
-                left: Box::new(left),
-                right: Box::new(right),
-            });
+            let span = Span::new(left.span.start, right.span.end);
+            left = Node::new(
+                NodeKind::CondAnd {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span,
+            );
         }
         Ok(left)
     }
 
+    #[allow(clippy::too_many_lines)]
     fn parse_cond_primary(&mut self) -> Result<Node> {
+        let start = self.peek_pos()?;
         let tok = self.lexer.peek_token()?;
 
         // Handle ! (negation) — Parable drops it in S-expression output,
@@ -60,9 +74,12 @@ impl Parser {
         if tok.kind == TokenType::Bang {
             self.lexer.next_token()?;
             let inner = self.parse_cond_primary()?;
-            return Ok(Node::empty(NodeKind::CondNot {
-                operand: Box::new(inner),
-            }));
+            return Ok(self.spanned(
+                start,
+                NodeKind::CondNot {
+                    operand: Box::new(inner),
+                },
+            ));
         }
 
         // Handle ( grouped expression )
@@ -70,9 +87,12 @@ impl Parser {
             self.lexer.next_token()?;
             let inner = self.parse_cond_or()?;
             self.expect(TokenType::RightParen)?;
-            return Ok(Node::empty(NodeKind::CondParen {
-                inner: Box::new(inner),
-            }));
+            return Ok(self.spanned(
+                start,
+                NodeKind::CondParen {
+                    inner: Box::new(inner),
+                },
+            ));
         }
 
         let first = self.lexer.next_token()?;
@@ -83,10 +103,13 @@ impl Parser {
             && self.peek_cond_term()?.is_some()
         {
             let operand_tok = self.lexer.next_token()?;
-            return Ok(Node::empty(NodeKind::UnaryTest {
-                op: first.value,
-                operand: Box::new(cond_term(&operand_tok.value)),
-            }));
+            return Ok(self.spanned(
+                start,
+                NodeKind::UnaryTest {
+                    op: first.value,
+                    operand: Box::new(cond_term(&operand_tok.value)),
+                },
+            ));
         }
 
         // Check for binary operators
@@ -101,19 +124,25 @@ impl Parser {
             if is_binary {
                 let op = self.lexer.next_token()?;
                 let right = self.lexer.next_token()?;
-                return Ok(Node::empty(NodeKind::BinaryTest {
-                    op: op.value,
-                    left: Box::new(cond_term(&first.value)),
-                    right: Box::new(cond_term(&right.value)),
-                }));
+                return Ok(self.spanned(
+                    start,
+                    NodeKind::BinaryTest {
+                        op: op.value,
+                        left: Box::new(cond_term(&first.value)),
+                        right: Box::new(cond_term(&right.value)),
+                    },
+                ));
             }
         }
 
         // Bare word: implicit -n test
-        Ok(Node::empty(NodeKind::UnaryTest {
-            op: "-n".to_string(),
-            operand: Box::new(cond_term(&first.value)),
-        }))
+        Ok(self.spanned(
+            start,
+            NodeKind::UnaryTest {
+                op: "-n".to_string(),
+                operand: Box::new(cond_term(&first.value)),
+            },
+        ))
     }
 
     fn expect_cond_close(&mut self) -> Result<Token> {
