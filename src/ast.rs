@@ -45,12 +45,22 @@ impl Node {
 
     /// Extracts the source text for this node from the original source string.
     ///
+    /// Spans use character indices (matching `Token.pos` semantics).
     /// Returns an empty string for synthetic nodes or invalid spans.
     pub fn source_text<'a>(&self, source: &'a str) -> &'a str {
-        if self.span.is_empty() || self.span.end > source.len() {
+        if self.span.is_empty() {
             return "";
         }
-        &source[self.span.start..self.span.end]
+        // Convert char indices to byte offsets
+        let byte_start = source.char_indices().nth(self.span.start).map(|(i, _)| i);
+        let byte_end = source
+            .char_indices()
+            .nth(self.span.end)
+            .map_or(source.len(), |(i, _)| i);
+        match byte_start {
+            Some(s) if byte_end <= source.len() => &source[s..byte_end],
+            _ => "",
+        }
     }
 }
 

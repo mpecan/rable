@@ -50,6 +50,8 @@ pub struct Lexer {
     pub pending_heredocs: Vec<PendingHereDoc>,
     /// Completed here-document contents (filled after newline).
     pub heredoc_contents: Vec<String>,
+    /// End position (char index) of the most recently consumed token.
+    last_token_end: usize,
 }
 
 impl Lexer {
@@ -87,12 +89,18 @@ impl Lexer {
             ctx: LexerContext::default(),
             pending_heredocs: Vec::new(),
             heredoc_contents: Vec::new(),
+            last_token_end: 0,
         }
     }
 
     /// Returns the current position.
     pub const fn pos(&self) -> usize {
         self.pos
+    }
+
+    /// Returns the end position (char index) of the most recently consumed token.
+    pub const fn last_token_end(&self) -> usize {
+        self.last_token_end
     }
 
     /// Returns the current line number.
@@ -173,10 +181,13 @@ impl Lexer {
     ///
     /// Returns `RableError` on unterminated quotes or unexpected input.
     pub fn next_token(&mut self) -> Result<Token> {
-        if let Some(tok) = self.peeked.take() {
-            return Ok(tok);
-        }
-        self.read_token()
+        let tok = if let Some(tok) = self.peeked.take() {
+            tok
+        } else {
+            self.read_token()?
+        };
+        self.last_token_end = tok.pos + tok.value.len();
+        Ok(tok)
     }
 
     /// Peeks at the next token without consuming it.
