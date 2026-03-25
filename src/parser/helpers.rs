@@ -1,20 +1,31 @@
 //! Helper functions for the parser.
 
 use crate::ast::{Node, NodeKind};
+use crate::token::Token;
 
-/// Creates a `Word` node with decomposed parts.
+/// Creates a `Word` node from a lexer token, preserving spans.
+pub fn word_node_from_token(tok: &Token) -> Node {
+    Node::empty(NodeKind::Word {
+        parts: super::word_parts::decompose_word_with_spans(&tok.value, &tok.spans),
+        value: tok.value.clone(),
+        spans: tok.spans.clone(),
+    })
+}
+
+/// Creates a `Word` node for synthetic values (no lexer token).
 pub fn word_node(value: &str) -> Node {
     Node::empty(NodeKind::Word {
-        parts: super::word_parts::decompose_word(value),
+        parts: super::word_parts::decompose_word_literal(value),
         value: value.to_string(),
         spans: Vec::new(),
     })
 }
 
-/// Creates a `cond-term` node for conditional expressions.
-pub(super) fn cond_term(value: &str) -> Node {
+/// Creates a `cond-term` node from a lexer token, preserving spans.
+pub(super) fn cond_term_from_token(tok: &Token) -> Node {
     Node::empty(NodeKind::CondTerm {
-        value: value.to_string(),
+        value: tok.value.clone(),
+        spans: tok.spans.clone(),
     })
 }
 

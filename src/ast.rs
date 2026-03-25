@@ -326,7 +326,11 @@ pub enum NodeKind {
     CondParen { inner: Box<Node> },
 
     /// A term (word) in a conditional expression.
-    CondTerm { value: String },
+    CondTerm {
+        value: String,
+        #[allow(dead_code)]
+        spans: Vec<crate::lexer::word_builder::WordSpan>,
+    },
 
     // -- Other --
     /// Pipeline negation with `!`.

@@ -6,7 +6,8 @@
 use std::cell::Cell;
 
 use crate::ast::{ListItem, Node, NodeKind, Span};
-use crate::sexp::word::{WordSegment, parse_word_segments};
+use crate::lexer::word_builder::WordSpan;
+use crate::sexp::word::{WordSegment, segments_from_spans};
 
 thread_local! {
     static DECOMPOSE_DEPTH: Cell<usize> = const { Cell::new(0) };
@@ -40,17 +41,19 @@ impl Drop for DepthGuard {
     }
 }
 
-/// Decomposes a word's raw value into a list of typed AST nodes.
-///
-/// Each segment becomes one of:
-/// - `WordLiteral` for plain text
-/// - `CommandSubstitution` for `$(...)`
-/// - `ProcessSubstitution` for `<(...)` / `>(...)`
-/// - `AnsiCQuote` for `$'...'`
-/// - `LocaleString` for `$"..."`
-pub(super) fn decompose_word(value: &str) -> Vec<Node> {
-    let segments = parse_word_segments(value);
+/// Decomposes a word using lexer spans — the primary path for all
+/// token-derived words.
+pub(super) fn decompose_word_with_spans(value: &str, spans: &[WordSpan]) -> Vec<Node> {
+    let segments = segments_from_spans(value, spans);
     segments.into_iter().map(segment_to_node).collect()
+}
+
+/// Creates a single `WordLiteral` for synthetic values (no lexer token).
+/// Used for fd numbers (`"0"`, `"1"`), synthetic `"$@"`, etc.
+pub(super) fn decompose_word_literal(value: &str) -> Vec<Node> {
+    vec![Node::empty(NodeKind::WordLiteral {
+        value: value.to_string(),
+    })]
 }
 
 fn segment_to_node(seg: WordSegment) -> Node {
@@ -129,9 +132,17 @@ fn wrap_nodes(mut nodes: Vec<Node>) -> Node {
 mod tests {
     use super::*;
 
+    /// Helper: lex a single word and decompose it using the real span path.
+    #[allow(clippy::unwrap_used)]
+    fn decompose(source: &str) -> Vec<Node> {
+        let mut lexer = crate::lexer::Lexer::new(source, false);
+        let tok = lexer.next_token().unwrap();
+        decompose_word_with_spans(&tok.value, &tok.spans)
+    }
+
     #[test]
     fn plain_word() {
-        let parts = decompose_word("echo");
+        let parts = decompose("echo");
         assert_eq!(parts.len(), 1);
         assert!(matches!(
             &parts[0].kind,
@@ -141,7 +152,7 @@ mod tests {
 
     #[test]
     fn simple_variable_stays_literal() {
-        let parts = decompose_word("$foo");
+        let parts = decompose("$foo");
         assert_eq!(parts.len(), 1);
         assert!(matches!(
             &parts[0].kind,
@@ -151,7 +162,7 @@ mod tests {
 
     #[test]
     fn command_substitution() {
-        let parts = decompose_word("$(date)");
+        let parts = decompose("$(date)");
         assert_eq!(parts.len(), 1);
         assert!(matches!(
             &parts[0].kind,
@@ -161,7 +172,7 @@ mod tests {
 
     #[test]
     fn mixed_segments() {
-        let parts = decompose_word("hello$(world)end");
+        let parts = decompose("hello$(world)end");
         assert_eq!(parts.len(), 3);
         assert!(matches!(
             &parts[0].kind,
@@ -179,7 +190,7 @@ mod tests {
 
     #[test]
     fn ansi_c_quote() {
-        let parts = decompose_word("$'foo\\nbar'");
+        let parts = decompose("$'foo\\nbar'");
         assert_eq!(parts.len(), 1);
         assert!(matches!(
             &parts[0].kind,
@@ -189,7 +200,7 @@ mod tests {
 
     #[test]
     fn process_substitution() {
-        let parts = decompose_word("<(cmd)");
+        let parts = decompose("<(cmd)");
         assert_eq!(parts.len(), 1);
         assert!(matches!(
             &parts[0].kind,
@@ -200,7 +211,7 @@ mod tests {
 
     #[test]
     fn locale_string() {
-        let parts = decompose_word("$\"hello\"");
+        let parts = decompose("$\"hello\"");
         assert_eq!(parts.len(), 1);
         assert!(matches!(
             &parts[0].kind,

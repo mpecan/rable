@@ -19,11 +19,12 @@ impl fmt::Display for NodeKind {
         match self {
             Self::Word { value, spans, .. } => {
                 write!(f, "(word \"")?;
-                if !spans.is_empty() && !word::needs_value_path(value) {
+                if spans.is_empty() {
+                    // Synthetic word (no lexer token) — escape directly
+                    write_escaped_word(f, value)?;
+                } else {
                     let segments = word::segments_from_spans(value, spans);
                     word::write_word_segments(f, &segments)?;
-                } else {
-                    word::write_word_value(f, value)?;
                 }
                 write!(f, "\")")
             }
@@ -205,18 +206,19 @@ impl fmt::Display for NodeKind {
                 write!(f, "(cond {body})")?;
                 write_redirects(f, redirects)
             }
-            Self::CondTerm { value } => {
+            Self::CondTerm { value, spans } => {
                 // Strip $" locale prefix
                 let val = if value.starts_with("$\"") {
                     &value[1..]
                 } else {
                     value
                 };
-                // Process cmdsubs within the value (for redirect normalization)
-                // but write other content raw (no escaping — cond-terms use raw values)
-                if val.contains("$(") {
+                let has_cmdsub = spans.iter().any(|s| {
+                    matches!(s.kind, crate::lexer::word_builder::WordSpanKind::CommandSub)
+                });
+                if has_cmdsub {
                     write!(f, "(cond-term \"")?;
-                    let segments = word::parse_word_segments(val);
+                    let segments = word::segments_from_spans(val, spans);
                     for seg in &segments {
                         match seg {
                             word::WordSegment::Literal(text) => write!(f, "{text}")?,
@@ -285,119 +287,6 @@ impl fmt::Display for CasePattern {
 // --- helpers ---
 
 // Old write_word_value replaced by word::write_word_value (segment-based)
-
-/// Extracts content from matched parentheses (for command substitution).
-/// Case-aware: `)` in case patterns doesn't close the substitution.
-#[allow(clippy::too_many_lines)]
-pub(super) fn extract_paren_content(chars: &[char], pos: &mut usize) -> String {
-    let mut content = String::new();
-    let mut depth = 1;
-    let mut case = crate::context::CaseTracker::default();
-    let mut word_buf = String::new();
-
-    while *pos < chars.len() {
-        let c = chars[*pos];
-        // Handle backslash-escaped characters
-        if c == '\\' && *pos + 1 < chars.len() {
-            word_buf.clear();
-            content.push(c);
-            *pos += 1;
-            content.push(chars[*pos]);
-            *pos += 1;
-            continue;
-        }
-        if c == '(' {
-            case.check_word(&word_buf);
-            word_buf.clear();
-            // In case pattern mode, `(` is optional pattern prefix — don't increment depth
-            if !case.is_pattern_open() {
-                depth += 1;
-            }
-            content.push(c);
-        } else if c == ')' {
-            case.check_word(&word_buf);
-            word_buf.clear();
-            if case.is_pattern_close() {
-                // Case pattern terminator — don't close
-                content.push(c);
-                case.close_pattern();
-            } else {
-                depth -= 1;
-                if depth == 0 {
-                    *pos += 1;
-                    return content;
-                }
-                content.push(c);
-            }
-        } else if c == '\'' {
-            case.check_word(&word_buf);
-            word_buf.clear();
-            crate::context::skip_single_quoted(chars, pos, &mut content);
-            continue; // skip_single_quoted already advances pos
-        } else if c == '"' {
-            case.check_word(&word_buf);
-            word_buf.clear();
-            crate::context::skip_double_quoted(chars, pos, &mut content);
-            continue;
-        } else if c == ';' {
-            case.check_word(&word_buf);
-            word_buf.clear();
-            content.push(c);
-            // Check for ;; ;& ;;& which resume case pattern mode
-            if *pos + 1 < chars.len() {
-                if chars[*pos + 1] == ';' {
-                    *pos += 1;
-                    content.push(chars[*pos]);
-                    if *pos + 1 < chars.len() && chars[*pos + 1] == '&' {
-                        *pos += 1;
-                        content.push(chars[*pos]);
-                    }
-                    case.resume_pattern();
-                } else if chars[*pos + 1] == '&' {
-                    *pos += 1;
-                    content.push(chars[*pos]);
-                    case.resume_pattern();
-                }
-            }
-        } else if c == '`' {
-            case.check_word(&word_buf);
-            word_buf.clear();
-            crate::context::skip_backtick(chars, pos, &mut content);
-            continue;
-        } else if c == '#' {
-            // Comment: # after whitespace/newline skips to end of line
-            case.check_word(&word_buf);
-            word_buf.clear();
-            let prev = if content.is_empty() {
-                '\n'
-            } else {
-                content.chars().last().unwrap_or('\n')
-            };
-            if prev == '\n' || prev == ' ' || prev == '\t' {
-                while *pos < chars.len() && chars[*pos] != '\n' {
-                    *pos += 1;
-                }
-                // Don't advance past the newline — the main loop will
-                if *pos < chars.len() {
-                    *pos -= 1; // will be incremented by the outer loop
-                }
-            } else {
-                content.push(c);
-            }
-        } else if c == ' ' || c == '\t' || c == '\n' || c == '|' {
-            case.check_word(&word_buf);
-            word_buf.clear();
-            content.push(c);
-        } else {
-            word_buf.push(c);
-            content.push(c);
-        }
-        *pos += 1;
-    }
-    content
-}
-
-// CaseTracker moved to crate::context
 
 /// Normalizes command substitution content:
 /// - Strips leading/trailing whitespace and newlines
@@ -785,30 +674,21 @@ fn write_in_list(f: &mut fmt::Formatter<'_>, words: Option<&[Node]>) -> fmt::Res
 
 fn write_redirect(f: &mut fmt::Formatter<'_>, op: &str, target: &Node, _fd: i32) -> fmt::Result {
     write!(f, "(redirect \"{op}\" ")?;
-    if let NodeKind::Word { value, .. } = &target.kind {
+    if let NodeKind::Word { value, spans, .. } = &target.kind {
         // For fd dup operations (>&, <&), bare digit-only targets are unquoted
         let is_fd_op =
             op.starts_with(">&") || op.starts_with("<&") || op.ends_with("&-") || op.ends_with('&');
         if is_fd_op && !value.is_empty() && value.chars().all(|c| c.is_ascii_digit()) {
             write!(f, "{value})")
-        } else if value.starts_with("$\"") {
-            // Locale string: strip $ prefix, preserve literal quotes
-            write!(f, "\"{}\")", &value[1..])
-        } else if value.starts_with("$'") && !needs_word_processing(value) {
-            // ANSI-C at start with no nested constructs: process with literal newlines
-            let chars: Vec<char> = value.chars().collect();
-            let mut pos = 2; // skip $'
-            let processed = process_ansi_c_content(&chars, &mut pos);
-            // Include any text after the closing quote
-            let remaining: String = chars[pos..].iter().collect();
-            write!(f, "\"'{processed}'{remaining}\")")
-        } else if needs_word_processing(value) {
-            // Values with $'...', $"...", $(...), <(...) need segment processing
+        } else if !spans.is_empty() {
+            // Use span-based formatting — redirect targets use literal
+            // output (no S-expression escaping of quotes)
             write!(f, "\"")?;
-            word::write_word_value(f, value)?;
+            let segments = word::segments_from_spans(value, spans);
+            write_redirect_segments(f, &segments)?;
             write!(f, "\")")
         } else {
-            // Plain values: output as-is inside quotes
+            // Synthetic nodes (fd strings) — output as-is
             write!(f, "\"{value}\")")
         }
     } else {
@@ -816,18 +696,49 @@ fn write_redirect(f: &mut fmt::Formatter<'_>, op: &str, target: &Node, _fd: i32)
     }
 }
 
-/// Returns true if a redirect target value needs word segment processing.
-/// Note: $' and $" at the START are handled specially (literal newlines),
-/// so only mid-value occurrences or $()/<() trigger word processing.
-fn needs_word_processing(value: &str) -> bool {
-    if value.starts_with("$'") || value.starts_with("$\"") {
-        // $' or $" at start handled by special cases — only need word processing
-        // if there's ALSO a $( or <( elsewhere in the value
-        let rest = &value[2..];
-        rest.contains("$(") || rest.contains("<(") || rest.contains(">(")
-    } else {
-        value.contains("$'") || value.contains("$(") || value.contains("<(") || value.contains(">(")
+/// Formats word segments for redirect targets — uses literal output
+/// (no S-expression escaping) for text, but processes ANSI-C escapes
+/// and reformats command substitutions.
+fn write_redirect_segments(
+    f: &mut fmt::Formatter<'_>,
+    segments: &[word::WordSegment],
+) -> fmt::Result {
+    for seg in segments {
+        match seg {
+            word::WordSegment::Literal(text) => write!(f, "{text}")?,
+            word::WordSegment::AnsiCQuote(raw) => {
+                let chars: Vec<char> = raw.chars().collect();
+                let mut pos = 0;
+                let processed = process_ansi_c_content(&chars, &mut pos);
+                write!(f, "'{processed}'")?;
+            }
+            word::WordSegment::LocaleString(content) => {
+                // $"..." → "..." (content already includes "...")
+                write!(f, "{content}")?;
+            }
+            word::WordSegment::CommandSubstitution(content) => {
+                write!(f, "$(")?;
+                if let Some(reformatted) = crate::format::reformat_bash(content) {
+                    write!(f, "{reformatted}")?;
+                } else {
+                    let normalized = normalize_cmdsub_content(content);
+                    write!(f, "{normalized}")?;
+                }
+                write!(f, ")")?;
+            }
+            word::WordSegment::ProcessSubstitution(dir, content) => {
+                write!(f, "{dir}(")?;
+                if let Some(reformatted) = crate::format::reformat_bash(content) {
+                    write!(f, "{reformatted}")?;
+                } else {
+                    let normalized = normalize_cmdsub_content(content);
+                    write!(f, "{normalized}")?;
+                }
+                write!(f, ")")?;
+            }
+        }
     }
+    Ok(())
 }
 
 fn write_param(

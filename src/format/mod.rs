@@ -206,8 +206,8 @@ fn format_command_words(assignments: &[Node], words: &[Node], out: &mut String) 
         if i > 0 {
             out.push(' ');
         }
-        if let NodeKind::Word { value, .. } = &w.kind {
-            out.push_str(&process_word_value(value));
+        if let NodeKind::Word { value, spans, .. } = &w.kind {
+            out.push_str(&process_word_value(value, spans));
         } else {
             out.push_str(&w.to_string());
         }
@@ -233,8 +233,8 @@ fn format_redirect(node: &Node, out: &mut String) {
         if !is_dup {
             out.push(' ');
         }
-        if let NodeKind::Word { value, .. } = &target.kind {
-            out.push_str(&process_word_value(value));
+        if let NodeKind::Word { value, spans, .. } = &target.kind {
+            out.push_str(&process_word_value(value, spans));
         }
     } else if let NodeKind::HereDoc {
         delimiter,
@@ -515,7 +515,7 @@ fn format_cond_node(node: &Node, out: &mut String) {
             out.push_str("! ");
             format_cond_node(operand, out);
         }
-        NodeKind::CondTerm { value } => {
+        NodeKind::CondTerm { value, .. } => {
             out.push_str(value);
         }
         NodeKind::CondParen { inner } => {
@@ -535,13 +535,12 @@ fn indent_str(out: &mut String, n: usize) {
     }
 }
 
-/// Process a word value for canonical bash output using the same segment
-/// pipeline as S-expression formatting. This ensures consistent handling
-/// of `$'...'`, `$"..."`, and `$(...)` across both output paths.
-fn process_word_value(value: &str) -> String {
-    use crate::sexp::word::{WordSegment, parse_word_segments};
+/// Process a word value for canonical bash output using span-based
+/// segment extraction.
+fn process_word_value(value: &str, spans: &[crate::lexer::word_builder::WordSpan]) -> String {
+    use crate::sexp::word::{WordSegment, segments_from_spans};
 
-    let segments = parse_word_segments(value);
+    let segments = segments_from_spans(value, spans);
     let mut result = String::with_capacity(value.len());
 
     for seg in &segments {
