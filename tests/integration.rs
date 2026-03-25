@@ -225,6 +225,7 @@ const KNOWN_ORACLE_FAILURES: &[&str] = &[
     "word_boundaries 2",
 ];
 
+#[derive(Default)]
 struct OracleResults {
     total_pass: usize,
     total_fail: usize,
@@ -268,67 +269,57 @@ fn run_oracle_file(path: &Path, results: &mut OracleResults) {
     results.total_fail += fail;
 }
 
-/// Oracle-derived tests: correctness differences found by fuzzing against bash-oracle.
-/// Asserts that known failures still fail and known passes don't regress.
-#[test]
-fn oracle_test_suite() {
-    let test_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/oracle");
-    if !test_dir.exists() {
-        eprintln!("Skipping: tests/oracle/ directory not found");
-        return;
-    }
-
-    eprintln!("\n=== Oracle Test Suite (bash-oracle compatibility) ===\n");
-
-    let filter = std::env::var("RABLE_TEST").ok();
-    let mut results = OracleResults {
-        total_pass: 0,
-        total_fail: 0,
-        regressions: Vec::new(),
-        newly_passing: Vec::new(),
-    };
-
-    let mut entries: Vec<_> = fs::read_dir(&test_dir)
-        .unwrap_or_else(|_| {
-            eprintln!("Warning: test directory not found: {}", test_dir.display());
-            std::process::exit(0);
-        })
-        .filter_map(Result::ok)
-        .filter(|e| e.path().extension().is_some_and(|ext| ext == "tests"))
-        .collect();
-
-    entries.sort_by_key(std::fs::DirEntry::file_name);
-
-    for entry in entries {
-        let path = entry.path();
-        let name = path.file_name().unwrap_or_default().to_string_lossy();
-        if filter.as_ref().is_some_and(|f| !name.contains(f.as_str())) {
-            continue;
+/// Generates a test function for each oracle test file.
+/// Each test asserts no regressions and no newly passing tests
+/// (which would need `KNOWN_ORACLE_FAILURES` updated).
+macro_rules! oracle_test {
+    ($name:ident, $file:expr) => {
+        #[test]
+        fn $name() {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/oracle")
+                .join($file);
+            if !path.exists() {
+                eprintln!("Skipping: {} not found", $file);
+                return;
+            }
+            let mut results = OracleResults::default();
+            run_oracle_file(&path, &mut results);
+            let total = results.total_pass + results.total_fail;
+            eprintln!(
+                "  {}: {}/{total} passed ({} remaining)",
+                $file, results.total_pass, results.total_fail,
+            );
+            for msg in &results.newly_passing {
+                eprintln!("{msg}");
+            }
+            for msg in &results.regressions {
+                eprintln!("{msg}");
+            }
+            assert!(
+                results.regressions.is_empty(),
+                "{}: {} regression(s)",
+                $file,
+                results.regressions.len()
+            );
+            assert!(
+                results.newly_passing.is_empty(),
+                "{}: {} newly passing — update KNOWN_ORACLE_FAILURES",
+                $file,
+                results.newly_passing.len()
+            );
         }
-        run_oracle_file(&path, &mut results);
-    }
-
-    let total = results.total_pass + results.total_fail;
-    eprintln!(
-        "\n=== Oracle Results: {}/{total} passed ({} remaining) ===\n",
-        results.total_pass, results.total_fail
-    );
-
-    for msg in &results.newly_passing {
-        eprintln!("{msg}");
-    }
-    for msg in &results.regressions {
-        eprintln!("{msg}");
-    }
-
-    assert!(
-        results.regressions.is_empty(),
-        "{} oracle test regression(s)",
-        results.regressions.len()
-    );
-    assert!(
-        results.newly_passing.is_empty(),
-        "{} oracle test(s) newly passing — update KNOWN_ORACLE_FAILURES",
-        results.newly_passing.len()
-    );
+    };
 }
+
+oracle_test!(oracle_ansi_c_escapes, "ansi_c_escapes.tests");
+oracle_test!(oracle_ansi_c_processing, "ansi_c_processing.tests");
+oracle_test!(oracle_array_normalization, "array_normalization.tests");
+oracle_test!(oracle_cmdsub_formatting, "cmdsub_formatting.tests");
+oracle_test!(oracle_heredoc_formatting, "heredoc_formatting.tests");
+oracle_test!(oracle_locale_strings, "locale_strings.tests");
+oracle_test!(oracle_other, "other.tests");
+oracle_test!(oracle_procsub_formatting, "procsub_formatting.tests");
+oracle_test!(oracle_redirect_formatting, "redirect_formatting.tests");
+oracle_test!(oracle_top_level_separation, "top_level_separation.tests");
+oracle_test!(oracle_word_boundaries, "word_boundaries.tests");
