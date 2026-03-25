@@ -64,8 +64,8 @@ impl Lexer {
         self.read_matched_parens(wb, 1)?;
         let content_end = wb.len().saturating_sub(1);
         if content_start < content_end {
-            let content: String = wb.value[content_start..content_end].to_string();
-            if !content.trim().is_empty() && crate::parse(&content, self.extglob()).is_err() {
+            let content = &wb.value[content_start..content_end];
+            if !content.trim().is_empty() && crate::parse(content, self.extglob()).is_err() {
                 return Err(RableError::parse(
                     "invalid command substitution",
                     self.pos,

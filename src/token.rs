@@ -151,7 +151,6 @@ pub struct Token {
     pub pos: usize,
     pub line: usize,
     /// Expansion spans within the word value (empty for non-word tokens).
-    #[allow(dead_code)]
     pub(crate) spans: Vec<WordSpan>,
 }
 
@@ -167,7 +166,6 @@ impl Token {
     }
 
     /// Creates a word token with pre-recorded expansion spans.
-    #[allow(dead_code)]
     pub(crate) const fn with_spans(
         kind: TokenType,
         value: String,

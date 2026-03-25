@@ -148,7 +148,7 @@ impl Parser {
                     break;
                 }
                 let tok = self.lexer.next_token()?;
-                ws.push(word_node_from_token(&tok));
+                ws.push(word_node_from_token(tok));
             }
             Some(ws)
         } else {
@@ -292,7 +292,7 @@ impl Parser {
             if tok.kind == TokenType::Pipe {
                 continue;
             }
-            pattern_words.push(word_node_from_token(&tok));
+            pattern_words.push(word_node_from_token(tok));
         }
 
         self.skip_newlines()?;
@@ -351,7 +351,7 @@ impl Parser {
                     break;
                 }
                 let tok = self.lexer.next_token()?;
-                ws.push(word_node_from_token(&tok));
+                ws.push(word_node_from_token(tok));
             }
             Some(ws)
         } else {
@@ -516,7 +516,7 @@ impl Parser {
         } else {
             None
         };
-        let mut words = vec![word_node_from_token(&first_tok)];
+        let mut words = vec![word_node_from_token(first_tok)];
         let mut redirects = Vec::new();
         loop {
             if self.at_end()? {
@@ -532,7 +532,7 @@ impl Parser {
                 if is_fd_number(&tok.value) && self.is_redirect_operator()? {
                     redirects.push(self.parse_redirect_with_fd(&tok)?);
                 } else {
-                    words.push(word_node_from_token(&tok));
+                    words.push(word_node_from_token(tok));
                 }
             } else {
                 break;

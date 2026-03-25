@@ -424,11 +424,11 @@ impl Parser {
             // After |, time is a regular word, not a keyword.
             // Temporarily demote it and all following reserved words to words.
             let time_tok = self.lexer.next_token()?;
-            let mut words = vec![word_node_from_token(&time_tok)];
+            let mut words = vec![word_node_from_token(time_tok)];
             // Check for -p flag (also a word in this context)
             if self.check_word("-p")? {
                 let p_tok = self.lexer.next_token()?;
-                words.push(word_node_from_token(&p_tok));
+                words.push(word_node_from_token(p_tok));
             }
             // Consume all remaining words (including reserved words as plain words)
             let mut redirects = Vec::new();
@@ -456,7 +456,7 @@ impl Parser {
                     continue;
                 }
                 let t = self.lexer.next_token()?;
-                words.push(word_node_from_token(&t));
+                words.push(word_node_from_token(t));
             }
             Ok(self.spanned(
                 start,
@@ -679,7 +679,7 @@ impl Parser {
             start,
             NodeKind::Redirect {
                 op: op_tok.value,
-                target: Box::new(word_node_from_token(&target_tok)),
+                target: Box::new(word_node_from_token(target_tok)),
                 fd,
             },
         ))

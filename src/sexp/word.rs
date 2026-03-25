@@ -204,20 +204,22 @@ const fn is_sexp_relevant(kind: &crate::lexer::word_builder::WordSpanKind) -> bo
     )
 }
 
-/// Collects sexp-relevant spans that are not nested inside another
-/// sexp-relevant span. Sorted by start offset.
+/// Collects top-level sexp-relevant spans sorted by start offset.
+/// A span is top-level if no other sexp-relevant span fully contains it.
 fn collect_top_level_sexp_spans(
     spans: &[crate::lexer::word_builder::WordSpan],
 ) -> Vec<&crate::lexer::word_builder::WordSpan> {
-    let relevant: Vec<_> = spans.iter().filter(|s| is_sexp_relevant(&s.kind)).collect();
-    relevant
-        .iter()
-        .filter(|s| {
-            // A span is top-level if no other relevant span contains it
-            !relevant.iter().any(|outer| {
-                outer.start <= s.start && outer.end >= s.end && !std::ptr::eq(*outer, **s)
-            })
-        })
-        .copied()
-        .collect()
+    // Collect sexp-relevant spans sorted by start offset
+    let mut relevant: Vec<_> = spans.iter().filter(|s| is_sexp_relevant(&s.kind)).collect();
+    relevant.sort_by_key(|s| s.start);
+    // Single pass: skip spans nested inside a previously collected one
+    let mut result = Vec::new();
+    let mut covered_until: usize = 0;
+    for span in relevant {
+        if span.start >= covered_until {
+            covered_until = span.end;
+            result.push(span);
+        }
+    }
+    result
 }

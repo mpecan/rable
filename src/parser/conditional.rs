@@ -107,7 +107,7 @@ impl Parser {
                 start,
                 NodeKind::UnaryTest {
                     op: first.value,
-                    operand: Box::new(cond_term_from_token(&operand_tok)),
+                    operand: Box::new(cond_term_from_token(operand_tok)),
                 },
             ));
         }
@@ -128,8 +128,8 @@ impl Parser {
                     start,
                     NodeKind::BinaryTest {
                         op: op.value,
-                        left: Box::new(cond_term_from_token(&first)),
-                        right: Box::new(cond_term_from_token(&right)),
+                        left: Box::new(cond_term_from_token(first)),
+                        right: Box::new(cond_term_from_token(right)),
                     },
                 ));
             }
@@ -140,7 +140,7 @@ impl Parser {
             start,
             NodeKind::UnaryTest {
                 op: "-n".to_string(),
-                operand: Box::new(cond_term_from_token(&first)),
+                operand: Box::new(cond_term_from_token(first)),
             },
         ))
     }

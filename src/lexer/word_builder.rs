@@ -4,7 +4,6 @@
 //! that record where each expansion starts and ends, along with the
 //! quoting context at the point of recording. This eliminates the need
 //! for downstream code to re-parse word values.
-#![allow(dead_code)]
 
 /// The quoting context at the point where a span was recorded.
 ///
@@ -50,10 +49,6 @@ impl WordBuilder {
 
     pub fn push(&mut self, c: char) {
         self.value.push(c);
-    }
-
-    pub fn push_str(&mut self, s: &str) {
-        self.value.push_str(s);
     }
 
     pub fn ends_with(&self, c: char) -> bool {

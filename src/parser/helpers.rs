@@ -3,12 +3,13 @@
 use crate::ast::{Node, NodeKind};
 use crate::token::Token;
 
-/// Creates a `Word` node from a lexer token, preserving spans.
-pub fn word_node_from_token(tok: &Token) -> Node {
+/// Creates a `Word` node from a lexer token, moving value and spans.
+pub fn word_node_from_token(tok: Token) -> Node {
+    let parts = super::word_parts::decompose_word_with_spans(&tok.value, &tok.spans);
     Node::empty(NodeKind::Word {
-        parts: super::word_parts::decompose_word_with_spans(&tok.value, &tok.spans),
-        value: tok.value.clone(),
-        spans: tok.spans.clone(),
+        parts,
+        value: tok.value,
+        spans: tok.spans,
     })
 }
 
@@ -21,11 +22,11 @@ pub fn word_node(value: &str) -> Node {
     })
 }
 
-/// Creates a `cond-term` node from a lexer token, preserving spans.
-pub(super) fn cond_term_from_token(tok: &Token) -> Node {
+/// Creates a `cond-term` node from a lexer token, moving value and spans.
+pub(super) fn cond_term_from_token(tok: Token) -> Node {
     Node::empty(NodeKind::CondTerm {
-        value: tok.value.clone(),
-        spans: tok.spans.clone(),
+        value: tok.value,
+        spans: tok.spans,
     })
 }
 

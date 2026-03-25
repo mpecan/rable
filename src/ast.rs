@@ -75,7 +75,6 @@ pub enum NodeKind {
     Word {
         value: String,
         parts: Vec<Node>,
-        #[allow(dead_code)]
         spans: Vec<crate::lexer::word_builder::WordSpan>,
     },
 
@@ -328,7 +327,6 @@ pub enum NodeKind {
     /// A term (word) in a conditional expression.
     CondTerm {
         value: String,
-        #[allow(dead_code)]
         spans: Vec<crate::lexer::word_builder::WordSpan>,
     },
 

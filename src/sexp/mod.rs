@@ -213,31 +213,22 @@ impl fmt::Display for NodeKind {
                 } else {
                     value
                 };
-                let has_cmdsub = spans.iter().any(|s| {
-                    matches!(s.kind, crate::lexer::word_builder::WordSpanKind::CommandSub)
-                });
-                if has_cmdsub {
-                    write!(f, "(cond-term \"")?;
-                    let segments = word::segments_from_spans(val, spans);
-                    for seg in &segments {
-                        match seg {
-                            word::WordSegment::Literal(text) => write!(f, "{text}")?,
-                            word::WordSegment::CommandSubstitution(content) => {
-                                write!(f, "$(")?;
-                                if let Some(reformatted) = crate::format::reformat_bash(content) {
-                                    write!(f, "{reformatted}")?;
-                                } else {
-                                    let normalized = normalize_cmdsub_content(content);
-                                    write!(f, "{normalized}")?;
-                                }
-                                write!(f, ")")?;
-                            }
-                            _ => write!(f, "{seg:?}")?,
-                        }
-                    }
-                    write!(f, "\")")
-                } else {
+                if spans.is_empty() {
                     write!(f, "(cond-term \"{val}\")")
+                } else {
+                    let segments = word::segments_from_spans(val, spans);
+                    if segments
+                        .iter()
+                        .all(|s| matches!(s, word::WordSegment::Literal(_)))
+                    {
+                        // No expansions needing processing
+                        write!(f, "(cond-term \"{val}\")")
+                    } else {
+                        write!(f, "(cond-term \"")?;
+                        // CondTerm uses raw output (like redirect targets)
+                        write_redirect_segments(f, &segments)?;
+                        write!(f, "\")")
+                    }
                 }
             }
             Self::UnaryTest { op, operand } => {
