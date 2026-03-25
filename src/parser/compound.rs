@@ -1,7 +1,7 @@
 //! Compound command parsers: if, while, until, for, case, select,
 //! subshell, brace group, function, coproc, arithmetic command.
 
-use crate::ast::Node;
+use crate::ast::{Node, NodeKind};
 use crate::error::Result;
 use crate::token::{Token, TokenType};
 
@@ -32,12 +32,12 @@ impl Parser {
         self.expect(TokenType::Fi)?;
         let redirects = self.parse_trailing_redirects()?;
 
-        Ok(Node::If {
+        Ok(Node::empty(NodeKind::If {
             condition: Box::new(condition),
             then_body: Box::new(then_body),
             else_body,
             redirects,
-        })
+        }))
     }
 
     pub(super) fn parse_elif(&mut self) -> Result<Node> {
@@ -60,12 +60,12 @@ impl Parser {
         };
 
         self.leave();
-        Ok(Node::If {
+        Ok(Node::empty(NodeKind::If {
             condition: Box::new(condition),
             then_body: Box::new(then_body),
             else_body,
             redirects: Vec::new(),
-        })
+        }))
     }
 
     pub(super) fn parse_while(&mut self) -> Result<Node> {
@@ -90,17 +90,17 @@ impl Parser {
         let condition = Box::new(condition);
         let body = Box::new(body);
         if is_while {
-            Ok(Node::While {
+            Ok(Node::empty(NodeKind::While {
                 condition,
                 body,
                 redirects,
-            })
+            }))
         } else {
-            Ok(Node::Until {
+            Ok(Node::empty(NodeKind::Until {
                 condition,
                 body,
                 redirects,
-            })
+            }))
         }
     }
 
@@ -136,10 +136,10 @@ impl Parser {
             }
             Some(ws)
         } else {
-            Some(vec![Node::Word {
+            Some(vec![Node::empty(NodeKind::Word {
                 value: "\"$@\"".to_string(),
                 parts: Vec::new(),
-            }])
+            })])
         };
 
         if self.peek_is(TokenType::Semi)? || self.peek_is(TokenType::Newline)? {
@@ -149,12 +149,12 @@ impl Parser {
         self.lexer.set_command_start();
         let (body, redirects) = self.parse_loop_body()?;
 
-        Ok(Node::For {
+        Ok(Node::empty(NodeKind::For {
             var,
             words,
             body: Box::new(body),
             redirects,
-        })
+        }))
     }
 
     fn parse_for_arith(&mut self) -> Result<Node> {
@@ -183,13 +183,13 @@ impl Parser {
         self.lexer.set_command_start();
         let (body, redirects) = self.parse_loop_body()?;
 
-        Ok(Node::ForArith {
+        Ok(Node::empty(NodeKind::ForArith {
             init,
             cond,
             incr,
             body: Box::new(body),
             redirects,
-        })
+        }))
     }
 
     /// Shared do/done or {/} loop body parsing.
@@ -197,7 +197,7 @@ impl Parser {
         if self.peek_is(TokenType::LeftBrace)? {
             let bg = self.parse_brace_group()?;
             let redirects = self.parse_trailing_redirects()?;
-            if let Node::BraceGroup { body, .. } = bg {
+            if let NodeKind::BraceGroup { body, .. } = bg.kind {
                 Ok((*body, redirects))
             } else {
                 Ok((bg, redirects))
@@ -215,10 +215,10 @@ impl Parser {
     pub(super) fn parse_case(&mut self) -> Result<Node> {
         self.expect(TokenType::Case)?;
         let word_tok = self.lexer.next_token()?;
-        let word = Box::new(Node::Word {
+        let word = Box::new(Node::empty(NodeKind::Word {
             value: word_tok.value,
             parts: Vec::new(),
-        });
+        }));
 
         self.lexer.set_command_start();
         self.skip_newlines()?;
@@ -236,11 +236,11 @@ impl Parser {
         self.expect(TokenType::Esac)?;
         let redirects = self.parse_trailing_redirects()?;
 
-        Ok(Node::Case {
+        Ok(Node::empty(NodeKind::Case {
             word,
             patterns,
             redirects,
-        })
+        }))
     }
 
     fn parse_case_pattern(&mut self) -> Result<crate::ast::CasePattern> {
@@ -329,12 +329,12 @@ impl Parser {
         self.lexer.set_command_start();
         let (body, redirects) = self.parse_loop_body()?;
 
-        Ok(Node::Select {
+        Ok(Node::empty(NodeKind::Select {
             var,
             words,
             body: Box::new(body),
             redirects,
-        })
+        }))
     }
 
     pub(super) fn parse_subshell(&mut self) -> Result<Node> {
@@ -344,10 +344,10 @@ impl Parser {
         self.expect(TokenType::RightParen)?;
         let redirects = self.parse_trailing_redirects()?;
 
-        Ok(Node::Subshell {
+        Ok(Node::empty(NodeKind::Subshell {
             body: Box::new(body),
             redirects,
-        })
+        }))
     }
 
     pub(super) fn parse_brace_group(&mut self) -> Result<Node> {
@@ -357,10 +357,10 @@ impl Parser {
         self.expect_brace_close()?;
         let redirects = self.parse_trailing_redirects()?;
 
-        Ok(Node::BraceGroup {
+        Ok(Node::empty(NodeKind::BraceGroup {
             body: Box::new(body),
             redirects,
-        })
+        }))
     }
 
     pub(super) fn parse_function(&mut self) -> Result<Node> {
@@ -381,23 +381,23 @@ impl Parser {
                 let body = self.parse_list()?;
                 self.expect(TokenType::RightParen)?;
                 let redirects = self.parse_trailing_redirects()?;
-                return Ok(Node::Function {
+                return Ok(Node::empty(NodeKind::Function {
                     name,
-                    body: Box::new(Node::Subshell {
+                    body: Box::new(Node::empty(NodeKind::Subshell {
                         body: Box::new(body),
                         redirects,
-                    }),
-                });
+                    })),
+                }));
             }
         }
 
         self.skip_newlines()?;
         let body = self.parse_command()?;
 
-        Ok(Node::Function {
+        Ok(Node::empty(NodeKind::Function {
             name,
             body: Box::new(body),
-        })
+        }))
     }
 
     pub(super) fn parse_function_def(&mut self, name_tok: &Token) -> Result<Node> {
@@ -407,12 +407,13 @@ impl Parser {
         self.skip_newlines()?;
         let body = self.parse_command()?;
 
-        Ok(Node::Function {
+        Ok(Node::empty(NodeKind::Function {
             name: name_tok.value.clone(),
             body: Box::new(body),
-        })
+        }))
     }
 
+    #[allow(clippy::too_many_lines)]
     pub(super) fn parse_coproc(&mut self) -> Result<Node> {
         self.expect(TokenType::Coproc)?;
 
@@ -424,10 +425,10 @@ impl Parser {
             )
         {
             let command = self.parse_command()?;
-            return Ok(Node::Coproc {
+            return Ok(Node::empty(NodeKind::Coproc {
                 name: None,
                 command: Box::new(command),
-            });
+            }));
         }
 
         let first_tok = self.lexer.next_token()?;
@@ -440,10 +441,10 @@ impl Parser {
             ) {
             let n = Some(first_tok.value);
             let command = self.parse_command()?;
-            return Ok(Node::Coproc {
+            return Ok(Node::empty(NodeKind::Coproc {
                 name: n,
                 command: Box::new(command),
-            });
+            }));
         } else {
             None
         };
@@ -469,10 +470,14 @@ impl Parser {
                 break;
             }
         }
-        Ok(Node::Coproc {
+        Ok(Node::empty(NodeKind::Coproc {
             name,
-            command: Box::new(Node::Command { words, redirects }),
-        })
+            command: Box::new(Node::empty(NodeKind::Command {
+                assignments: Vec::new(),
+                words,
+                redirects,
+            })),
+        }))
     }
 
     pub(super) fn parse_arith_command(&mut self) -> Result<Node> {
@@ -480,11 +485,11 @@ impl Parser {
         self.expect(TokenType::LeftParen)?;
         let content = self.lexer.read_until_double_paren()?;
         let redirects = self.parse_trailing_redirects()?;
-        Ok(Node::ArithmeticCommand {
+        Ok(Node::empty(NodeKind::ArithmeticCommand {
             expression: None,
             redirects,
             raw_content: content,
-        })
+        }))
     }
 
     pub(super) fn expect_brace_close(&mut self) -> Result<Token> {

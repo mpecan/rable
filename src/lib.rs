@@ -7,7 +7,7 @@
 //! # Quick Start
 //!
 //! ```
-//! use rable::{parse, Node};
+//! use rable::{parse, NodeKind};
 //!
 //! let nodes = parse("echo hello | grep h", false).unwrap();
 //! assert_eq!(nodes.len(), 1);
@@ -46,15 +46,15 @@
 //!
 //! # Working with the AST
 //!
-//! The AST uses a single [`Node`] enum with variants for all bash constructs.
-//! Pattern matching is the primary way to inspect nodes:
+//! The AST uses a [`Node`] struct wrapping a [`NodeKind`] enum with a [`Span`].
+//! Pattern matching on `node.kind` is the primary way to inspect nodes:
 //!
 //! ```
-//! use rable::{parse, Node};
+//! use rable::{parse, NodeKind};
 //!
 //! let nodes = parse("echo hello world", false).unwrap();
-//! match &nodes[0] {
-//!     Node::Command { words, redirects } => {
+//! match &nodes[0].kind {
+//!     NodeKind::Command { words, redirects, .. } => {
 //!         assert_eq!(words.len(), 3); // echo, hello, world
 //!         assert!(redirects.is_empty());
 //!     }
@@ -79,7 +79,7 @@ pub(crate) mod parser;
 mod python;
 
 // Convenient re-exports
-pub use ast::{CasePattern, Node};
+pub use ast::{CasePattern, ListItem, ListOperator, Node, NodeKind, PipeSep, Span};
 pub use error::{RableError, Result};
 pub use token::{Token, TokenType};
 
@@ -87,7 +87,7 @@ pub use token::{Token, TokenType};
 ///
 /// Each top-level command separated by newlines becomes a separate node.
 /// Commands separated by `;` on the same line are grouped into a single
-/// [`Node::List`].
+/// [`NodeKind::List`].
 ///
 /// Set `extglob` to `true` to enable extended glob patterns (`@()`, `?()`,
 /// `*()`, `+()`, `!()`).

@@ -2,7 +2,7 @@ mod compound;
 mod conditional;
 pub mod helpers;
 
-use crate::ast::Node;
+use crate::ast::{ListItem, ListOperator, Node, NodeKind, PipeSep};
 use crate::error::{RableError, Result};
 use crate::lexer::Lexer;
 use crate::token::{Token, TokenType};
@@ -14,6 +14,32 @@ use helpers::{
 
 /// Maximum recursion/iteration depth to prevent infinite loops.
 const MAX_DEPTH: usize = 1000;
+
+/// Creates a binary list node: `left op right`.
+fn make_list(left: Node, op: ListOperator, right: Node) -> Node {
+    Node::empty(NodeKind::List {
+        items: vec![
+            ListItem {
+                command: left,
+                operator: Some(op),
+            },
+            ListItem {
+                command: right,
+                operator: None,
+            },
+        ],
+    })
+}
+
+/// Creates a trailing-operator list node: `left op` (no RHS).
+fn make_trailing(left: Node, op: ListOperator) -> Node {
+    Node::empty(NodeKind::List {
+        items: vec![ListItem {
+            command: left,
+            operator: Some(op),
+        }],
+    })
+}
 
 /// Recursive descent parser for bash.
 pub struct Parser {
@@ -86,11 +112,8 @@ impl Parser {
                     if self.at_end()? || self.is_list_terminator()? {
                         break;
                     }
-                    // Check if next token is a newline (already skipped)
                     let right = self.parse_background()?;
-                    left = Node::List {
-                        parts: vec![left, Node::Operator { op: ";".into() }, right],
-                    };
+                    left = make_list(left, ListOperator::Semi, right);
                 }
                 _ => break,
             }
@@ -137,9 +160,7 @@ impl Parser {
                         break;
                     }
                     let right = self.parse_background()?;
-                    left = Node::List {
-                        parts: vec![left, Node::Operator { op: ";".into() }, right],
-                    };
+                    left = make_list(left, ListOperator::Semi, right);
                 }
                 _ => break,
             }
@@ -170,22 +191,16 @@ impl Parser {
                 || self.is_list_terminator()?
                 || self.lexer.peek_token()?.kind == TokenType::Newline
             {
-                left = Node::List {
-                    parts: vec![left, Node::Operator { op: "&".into() }],
-                };
+                left = make_trailing(left, ListOperator::Background);
                 break;
             }
             let peek = self.lexer.peek_token()?;
             if peek.kind == TokenType::Semi {
-                left = Node::List {
-                    parts: vec![left, Node::Operator { op: "&".into() }],
-                };
+                left = make_trailing(left, ListOperator::Background);
                 break;
             }
             let right = self.parse_and_or()?;
-            left = Node::List {
-                parts: vec![left, Node::Operator { op: "&".into() }, right],
-            };
+            left = make_list(left, ListOperator::Background, right);
         }
 
         Ok(left)
@@ -204,22 +219,16 @@ impl Parser {
             self.lexer.next_token()?;
             self.skip_newlines()?;
             if self.at_end()? || self.is_list_terminator()? {
-                left = Node::List {
-                    parts: vec![left, Node::Operator { op: "&".into() }],
-                };
+                left = make_trailing(left, ListOperator::Background);
                 break;
             }
             let peek = self.lexer.peek_token()?;
             if matches!(peek.kind, TokenType::Semi | TokenType::Newline) {
-                left = Node::List {
-                    parts: vec![left, Node::Operator { op: "&".into() }],
-                };
+                left = make_trailing(left, ListOperator::Background);
                 break;
             }
             let right = self.parse_and_or()?;
-            left = Node::List {
-                parts: vec![left, Node::Operator { op: "&".into() }, right],
-            };
+            left = make_list(left, ListOperator::Background, right);
         }
 
         Ok(left)
@@ -238,17 +247,13 @@ impl Parser {
                     self.lexer.next_token()?;
                     self.skip_newlines()?;
                     let right = self.parse_pipeline()?;
-                    left = Node::List {
-                        parts: vec![left, Node::Operator { op: "&&".into() }, right],
-                    };
+                    left = make_list(left, ListOperator::And, right);
                 }
                 TokenType::Or => {
                     self.lexer.next_token()?;
                     self.skip_newlines()?;
                     let right = self.parse_pipeline()?;
-                    left = Node::List {
-                        parts: vec![left, Node::Operator { op: "||".into() }, right],
-                    };
+                    left = make_list(left, ListOperator::Or, right);
                 }
                 _ => break,
             }
@@ -288,9 +293,9 @@ impl Parser {
                 return self.parse_pipeline_inner();
             }
             let inner = self.parse_pipeline()?;
-            return Ok(Node::Negation {
+            return Ok(Node::empty(NodeKind::Negation {
                 pipeline: Box::new(inner),
-            });
+            }));
         }
 
         if self.lexer.peek_token()?.kind == TokenType::Time {
@@ -304,18 +309,18 @@ impl Parser {
             if self.lexer.peek_token()?.kind == TokenType::Bang {
                 self.lexer.next_token()?;
                 let p = self.parse_pipeline_inner()?;
-                return Ok(Node::Negation {
-                    pipeline: Box::new(Node::Time {
+                return Ok(Node::empty(NodeKind::Negation {
+                    pipeline: Box::new(Node::empty(NodeKind::Time {
                         pipeline: Box::new(p),
                         posix,
-                    }),
-                });
+                    })),
+                }));
             }
             let inner = self.parse_pipeline_inner()?;
-            return Ok(Node::Time {
+            return Ok(Node::empty(NodeKind::Time {
                 pipeline: Box::new(inner),
                 posix,
-            });
+            }));
         }
 
         self.parse_pipeline_inner()
@@ -323,6 +328,7 @@ impl Parser {
 
     fn parse_pipeline_inner(&mut self) -> Result<Node> {
         let mut commands = vec![self.parse_command()?];
+        let mut separators = Vec::new();
 
         loop {
             if self.at_end()? {
@@ -333,11 +339,13 @@ impl Parser {
                 TokenType::Pipe => {
                     self.lexer.next_token()?;
                     self.skip_newlines()?;
+                    separators.push(PipeSep::Pipe);
                     commands.push(self.parse_pipeline_command()?);
                 }
                 TokenType::PipeBoth => {
                     self.lexer.next_token()?;
                     self.skip_newlines()?;
+                    separators.push(PipeSep::PipeBoth);
                     if !add_stderr_redirect(commands.last_mut()) {
                         commands.push(make_stderr_redirect());
                     }
@@ -350,7 +358,10 @@ impl Parser {
         if commands.len() == 1 {
             Ok(commands.remove(0))
         } else {
-            Ok(Node::Pipeline { commands })
+            Ok(Node::empty(NodeKind::Pipeline {
+                commands,
+                separators,
+            }))
         }
     }
 
@@ -402,7 +413,11 @@ impl Parser {
                 let t = self.lexer.next_token()?;
                 words.push(word_node(&t.value));
             }
-            Ok(Node::Command { words, redirects })
+            Ok(Node::empty(NodeKind::Command {
+                assignments: Vec::new(),
+                words,
+                redirects,
+            }))
         } else {
             self.parse_command_inner()
         };
@@ -450,9 +465,12 @@ impl Parser {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn parse_simple_command(&mut self) -> Result<Node> {
+        let mut assignments = Vec::new();
         let mut words = Vec::new();
         let mut redirects = Vec::new();
+        let mut saw_command_word = false;
 
         loop {
             if self.at_end()? {
@@ -475,6 +493,7 @@ impl Parser {
                     redirects.push(self.parse_redirect()?);
                 }
                 TokenType::Word | TokenType::AssignmentWord | TokenType::Number => {
+                    let is_assignment = tok.kind == TokenType::AssignmentWord;
                     let tok = self.lexer.next_token()?;
                     // fd numbers before redirects — only when adjacent (no space)
                     // and never before &> or &>>
@@ -492,24 +511,38 @@ impl Parser {
                     } else if adjacent && is_varfd(&tok.value) && self.is_redirect_operator()? {
                         redirects.push(self.parse_redirect()?);
                     } else {
-                        if words.is_empty() && self.peek_is(TokenType::LeftParen)? {
+                        if !saw_command_word
+                            && assignments.is_empty()
+                            && words.is_empty()
+                            && self.peek_is(TokenType::LeftParen)?
+                        {
                             return self.parse_function_def(&tok);
                         }
-                        words.push(Node::Word {
+                        let node = Node::empty(NodeKind::Word {
                             value: tok.value,
                             parts: Vec::new(),
                         });
+                        if is_assignment && !saw_command_word {
+                            assignments.push(node);
+                        } else {
+                            saw_command_word = true;
+                            words.push(node);
+                        }
                     }
                 }
                 _ => break,
             }
         }
 
-        if words.is_empty() && redirects.is_empty() {
-            return Ok(Node::Empty);
+        if assignments.is_empty() && words.is_empty() && redirects.is_empty() {
+            return Ok(Node::empty(NodeKind::Empty));
         }
 
-        Ok(Node::Command { words, redirects })
+        Ok(Node::empty(NodeKind::Command {
+            assignments,
+            words,
+            redirects,
+        }))
     }
 
     pub(super) fn parse_redirect(&mut self) -> Result<Node> {
@@ -533,49 +566,49 @@ impl Parser {
             let (delimiter, quoted) = parse_heredoc_delimiter(&delim_tok.value);
             self.lexer
                 .queue_heredoc(delimiter.clone(), strip_tabs, quoted);
-            return Ok(Node::HereDoc {
+            return Ok(Node::empty(NodeKind::HereDoc {
                 delimiter,
                 content: String::new(),
                 strip_tabs,
                 quoted,
                 fd,
                 complete: true,
-            });
+            }));
         }
 
         // >&- and <&- are complete close-fd operators (no target needed)
         if op_tok.value == ">&-" || op_tok.value == "<&-" {
-            return Ok(Node::Redirect {
+            return Ok(Node::empty(NodeKind::Redirect {
                 op: ">&-".to_string(),
                 target: Box::new(word_node("0")),
                 fd,
-            });
+            }));
         }
 
         let target_tok = self.lexer.next_token()?;
         let is_dup = op_tok.kind == TokenType::GreaterAnd || op_tok.kind == TokenType::LessAnd;
 
         if is_dup && target_tok.value == "-" {
-            return Ok(Node::Redirect {
+            return Ok(Node::empty(NodeKind::Redirect {
                 op: ">&-".to_string(),
                 target: Box::new(word_node("0")),
                 fd: -1,
-            });
+            }));
         }
         if is_dup && target_tok.value.ends_with('-') {
             let fd_str = &target_tok.value[..target_tok.value.len() - 1];
-            return Ok(Node::Redirect {
+            return Ok(Node::empty(NodeKind::Redirect {
                 op: op_tok.value,
                 target: Box::new(word_node(fd_str)),
                 fd: -1,
-            });
+            }));
         }
 
-        Ok(Node::Redirect {
+        Ok(Node::empty(NodeKind::Redirect {
             op: op_tok.value,
             target: Box::new(word_node(&target_tok.value)),
             fd,
-        })
+        }))
     }
 
     pub(super) fn peek_is(&mut self, kind: TokenType) -> Result<bool> {

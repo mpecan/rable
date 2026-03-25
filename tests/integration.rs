@@ -107,108 +107,96 @@ fn run_test(case: &TestCase) -> (bool, String) {
     }
 }
 
-/// Runs tests from a single file.
-/// If `verbose` is true, prints every test's pass/fail with details.
-fn run_single_file(path: &Path, verbose: bool) -> (usize, usize, Vec<String>) {
-    let content = fs::read_to_string(path).unwrap_or_default();
+/// Runs all tests from a single `.tests` file. Panics on any failure.
+fn run_file_asserting(file_name: &str) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/parable")
+        .join(file_name);
+    if !path.exists() {
+        eprintln!("Skipping: {file_name} not found");
+        return;
+    }
+
+    let content = fs::read_to_string(&path).unwrap_or_default();
     let cases = parse_test_file(&content);
-    let file_name = path.file_name().unwrap_or_default().to_string_lossy();
     let mut pass = 0;
-    let mut fail = 0;
     let mut failures = Vec::new();
 
     for case in &cases {
         let (passed, actual) = run_test(case);
         if passed {
             pass += 1;
-            if verbose {
-                eprintln!("  PASS :: {}", case.name);
-            }
         } else {
-            fail += 1;
-            let msg = format!(
+            failures.push(format!(
                 "  FAIL :: {}\n    input:    {:?}\n    expected: {:?}\n    actual:   {:?}",
                 case.name, case.input, case.expected, actual,
-            );
-            if verbose {
-                eprintln!("{msg}");
-            }
-            failures.push(msg);
+            ));
         }
     }
 
-    let total = pass + fail;
-    let status = if fail == 0 { "OK" } else { "FAIL" };
-    eprintln!("  {file_name}: {pass}/{total} passed [{status}]");
-    (pass, fail, failures)
-}
-
-/// Discovers and runs all `.tests` files in the given directory.
-fn run_test_files(dir: &Path) -> (usize, usize, Vec<String>) {
-    let mut total_pass = 0;
-    let mut total_fail = 0;
-    let mut failures = Vec::new();
-
-    let filter = std::env::var("RABLE_TEST").ok();
-
-    let mut entries: Vec<_> = fs::read_dir(dir)
-        .unwrap_or_else(|_| {
-            eprintln!("Warning: test directory not found: {}", dir.display());
-            std::process::exit(0);
-        })
-        .filter_map(Result::ok)
-        .filter(|e| e.path().extension().is_some_and(|ext| ext == "tests"))
-        .collect();
-
-    entries.sort_by_key(std::fs::DirEntry::file_name);
-
-    for entry in entries {
-        let path = entry.path();
-        let file_name = path.file_name().unwrap_or_default().to_string_lossy();
-
-        // If RABLE_TEST is set, only run matching files
-        if let Some(ref f) = filter
-            && !file_name.contains(f.as_str())
-        {
-            continue;
-        }
-
-        let verbose = filter.is_some();
-        let (p, f, mut ff) = run_single_file(&path, verbose);
-        total_pass += p;
-        total_fail += f;
-        failures.append(&mut ff);
-    }
-
-    (total_pass, total_fail, failures)
-}
-
-#[test]
-fn parable_test_suite() {
-    let test_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/parable");
-    if !test_dir.exists() {
-        eprintln!("Skipping: tests/parable/ directory not found");
-        return;
-    }
-
-    eprintln!("\n=== Rable Test Suite (Parable compatibility) ===\n");
-    let (pass, fail, failures) = run_test_files(&test_dir);
-    eprintln!("\n=== Results: {pass} passed, {fail} failed ===\n");
-
-    if !failures.is_empty() && std::env::var("RABLE_TEST").is_err() {
-        let max_show = 50;
-        let shown = failures.len().min(max_show);
-        eprintln!("First {shown} failures:");
-        for f in failures.iter().take(max_show) {
+    let total = pass + failures.len();
+    if !failures.is_empty() {
+        for f in &failures {
             eprintln!("{f}");
         }
-        if failures.len() > max_show {
-            eprintln!("  ... and {} more", failures.len() - max_show);
-        }
+        assert!(
+            failures.is_empty(),
+            "{file_name}: {pass}/{total} passed, {} failed",
+            failures.len()
+        );
     }
+}
 
-    let total = pass + fail;
-    eprintln!("Pass rate: {pass}/{total}");
+/// Generates one `#[test]` per Parable `.tests` file so each file appears
+/// as a separate test in `cargo test` output.
+macro_rules! parable_tests {
+    ($($name:ident => $file:literal),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                run_file_asserting($file);
+            }
+        )*
+    };
+}
+
+parable_tests! {
+    parable_01_words                => "01_words.tests",
+    parable_02_commands             => "02_commands.tests",
+    parable_03_pipelines            => "03_pipelines.tests",
+    parable_04_lists                => "04_lists.tests",
+    parable_05_redirects            => "05_redirects.tests",
+    parable_06_compound             => "06_compound.tests",
+    parable_07_if                   => "07_if.tests",
+    parable_08_loops                => "08_loops.tests",
+    parable_09_case                 => "09_case.tests",
+    parable_10_functions            => "10_functions.tests",
+    parable_11_parameter_expansion  => "11_parameter_expansion.tests",
+    parable_12_command_substitution => "12_command_substitution.tests",
+    parable_13_arithmetic           => "13_arithmetic.tests",
+    parable_14_here_documents       => "14_here_documents.tests",
+    parable_15_process_substitution => "15_process_substitution.tests",
+    parable_16_negation_time        => "16_negation_time.tests",
+    parable_17_conditional_expr     => "17_conditional_expr.tests",
+    parable_18_arrays               => "18_arrays.tests",
+    parable_19_coproc               => "19_coproc.tests",
+    parable_20_select               => "20_select.tests",
+    parable_21_cstyle_for           => "21_cstyle_for.tests",
+    parable_22_pipe_stderr          => "22_pipe_stderr.tests",
+    parable_23_case_fallthrough     => "23_case_fallthrough.tests",
+    parable_24_ansi_c_quoting       => "24_ansi_c_quoting.tests",
+    parable_25_locale_translation   => "25_locale_translation.tests",
+    parable_26_variable_fd          => "26_variable_fd.tests",
+    parable_27_deprecated_arithmetic => "27_deprecated_arithmetic.tests",
+    parable_28_obscure_edge_cases   => "28_obscure_edge_cases.tests",
+    parable_29_arithmetic_internals => "29_arithmetic_internals.tests",
+    parable_30_extglob_case         => "30_extglob_case.tests",
+    parable_31_parser_bugs          => "31_parser_bugs.tests",
+    parable_32_oils_gaps            => "32_oils_gaps.tests",
+    parable_33_brace_edge_cases     => "33_brace_edge_cases.tests",
+    parable_34_backslash_newline_bugs => "34_backslash_newline_bugs.tests",
+    parable_34_line_continuation    => "34_line_continuation.tests",
+    parable_35_parser_bugs          => "35_parser_bugs.tests",
 }
 
 /// Oracle-derived tests: correctness differences found by fuzzing against bash-oracle.
@@ -223,8 +211,54 @@ fn oracle_test_suite() {
     }
 
     eprintln!("\n=== Oracle Test Suite (bash-oracle compatibility) ===\n");
-    let (pass, fail, _failures) = run_test_files(&test_dir);
-    let total = pass + fail;
-    eprintln!("\n=== Oracle Results: {pass}/{total} passed ({fail} remaining) ===\n");
+
+    let filter = std::env::var("RABLE_TEST").ok();
+    let mut total_pass = 0;
+    let mut total_fail = 0;
+
+    let mut entries: Vec<_> = fs::read_dir(&test_dir)
+        .unwrap_or_else(|_| {
+            eprintln!("Warning: test directory not found: {}", test_dir.display());
+            std::process::exit(0);
+        })
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "tests"))
+        .collect();
+
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+
+    for entry in entries {
+        let path = entry.path();
+        let file_name = path.file_name().unwrap_or_default().to_string_lossy();
+
+        if let Some(ref f) = filter
+            && !file_name.contains(f.as_str())
+        {
+            continue;
+        }
+
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        let cases = parse_test_file(&content);
+        let mut pass = 0;
+        let mut fail = 0;
+
+        for case in &cases {
+            let (passed, _actual) = run_test(case);
+            if passed {
+                pass += 1;
+            } else {
+                fail += 1;
+            }
+        }
+
+        let total = pass + fail;
+        let status = if fail == 0 { "OK" } else { "FAIL" };
+        eprintln!("  {file_name}: {pass}/{total} passed [{status}]");
+        total_pass += pass;
+        total_fail += fail;
+    }
+
+    let total = total_pass + total_fail;
+    eprintln!("\n=== Oracle Results: {total_pass}/{total} passed ({total_fail} remaining) ===\n");
     // Intentionally does not assert — these are aspirational targets
 }

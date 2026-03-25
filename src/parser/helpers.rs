@@ -1,20 +1,20 @@
 //! Helper functions for the parser.
 
-use crate::ast::Node;
+use crate::ast::{Node, NodeKind};
 
 /// Creates a `Word` node with no parts.
 pub fn word_node(value: &str) -> Node {
-    Node::Word {
+    Node::empty(NodeKind::Word {
         value: value.to_string(),
         parts: Vec::new(),
-    }
+    })
 }
 
 /// Creates a `cond-term` node for conditional expressions.
 pub(super) fn cond_term(value: &str) -> Node {
-    Node::CondTerm {
+    Node::empty(NodeKind::CondTerm {
         value: value.to_string(),
-    }
+    })
 }
 
 /// Returns true if the string is a valid file descriptor number.
@@ -58,7 +58,11 @@ pub(super) fn is_cond_binary_op(s: &str) -> bool {
 /// Adds a `(redirect ">&" 1)` to a command node for `|&` pipe-both.
 #[allow(clippy::needless_pass_by_value)]
 pub(super) fn add_stderr_redirect(node: Option<&mut Node>) -> bool {
-    if let Some(Node::Command { redirects, .. }) = node {
+    if let Some(Node {
+        kind: NodeKind::Command { redirects, .. },
+        ..
+    }) = node
+    {
         redirects.push(make_stderr_redirect());
         true
     } else {
@@ -69,14 +73,14 @@ pub(super) fn add_stderr_redirect(node: Option<&mut Node>) -> bool {
 /// Creates a `(redirect ">&" 1)` node for pipe-both (|&) expansion.
 /// fd=2 so the reformatter outputs `2>&1` (stderr dup to stdout).
 pub(super) fn make_stderr_redirect() -> Node {
-    Node::Redirect {
+    Node::empty(NodeKind::Redirect {
         op: ">&".to_string(),
-        target: Box::new(Node::Word {
+        target: Box::new(Node::empty(NodeKind::Word {
             value: "1".to_string(),
             parts: Vec::new(),
-        }),
+        })),
         fd: 2,
-    }
+    })
 }
 
 /// Parses a here-document delimiter, stripping quotes if present.
@@ -119,13 +123,20 @@ pub(super) fn parse_heredoc_delimiter(raw: &str) -> (String, bool) {
 /// Walks an AST node and fills in empty `HereDoc` content from the lexer queue.
 #[allow(clippy::too_many_lines, clippy::match_same_arms)]
 pub(super) fn fill_heredoc_contents(node: &mut Node, lexer: &mut crate::lexer::Lexer) {
-    match node {
-        Node::HereDoc { content, .. } if content.is_empty() => {
+    match &mut node.kind {
+        NodeKind::HereDoc { content, .. } if content.is_empty() => {
             if let Some(c) = lexer.take_heredoc_content() {
                 *content = c;
             }
         }
-        Node::Command { words, redirects } => {
+        NodeKind::Command {
+            assignments,
+            words,
+            redirects,
+        } => {
+            for a in assignments {
+                fill_heredoc_contents(a, lexer);
+            }
             for w in words {
                 fill_heredoc_contents(w, lexer);
             }
@@ -133,17 +144,17 @@ pub(super) fn fill_heredoc_contents(node: &mut Node, lexer: &mut crate::lexer::L
                 fill_heredoc_contents(r, lexer);
             }
         }
-        Node::Pipeline { commands } => {
+        NodeKind::Pipeline { commands, .. } => {
             for c in commands {
                 fill_heredoc_contents(c, lexer);
             }
         }
-        Node::List { parts } => {
-            for p in parts {
-                fill_heredoc_contents(p, lexer);
+        NodeKind::List { items } => {
+            for item in items {
+                fill_heredoc_contents(&mut item.command, lexer);
             }
         }
-        Node::If {
+        NodeKind::If {
             condition,
             then_body,
             else_body,
@@ -158,12 +169,12 @@ pub(super) fn fill_heredoc_contents(node: &mut Node, lexer: &mut crate::lexer::L
                 fill_heredoc_contents(r, lexer);
             }
         }
-        Node::While {
+        NodeKind::While {
             condition,
             body,
             redirects,
         }
-        | Node::Until {
+        | NodeKind::Until {
             condition,
             body,
             redirects,
@@ -174,16 +185,16 @@ pub(super) fn fill_heredoc_contents(node: &mut Node, lexer: &mut crate::lexer::L
                 fill_heredoc_contents(r, lexer);
             }
         }
-        Node::Subshell { body, redirects } | Node::BraceGroup { body, redirects } => {
+        NodeKind::Subshell { body, redirects } | NodeKind::BraceGroup { body, redirects } => {
             fill_heredoc_contents(body, lexer);
             for r in redirects {
                 fill_heredoc_contents(r, lexer);
             }
         }
-        Node::For {
+        NodeKind::For {
             body, redirects, ..
         }
-        | Node::Select {
+        | NodeKind::Select {
             body, redirects, ..
         } => {
             fill_heredoc_contents(body, lexer);
@@ -191,7 +202,7 @@ pub(super) fn fill_heredoc_contents(node: &mut Node, lexer: &mut crate::lexer::L
                 fill_heredoc_contents(r, lexer);
             }
         }
-        Node::Case {
+        NodeKind::Case {
             patterns,
             redirects,
             ..
@@ -205,10 +216,10 @@ pub(super) fn fill_heredoc_contents(node: &mut Node, lexer: &mut crate::lexer::L
                 fill_heredoc_contents(r, lexer);
             }
         }
-        Node::Negation { pipeline } | Node::Time { pipeline, .. } => {
+        NodeKind::Negation { pipeline } | NodeKind::Time { pipeline, .. } => {
             fill_heredoc_contents(pipeline, lexer);
         }
-        Node::Function { body, .. } | Node::Coproc { command: body, .. } => {
+        NodeKind::Function { body, .. } | NodeKind::Coproc { command: body, .. } => {
             fill_heredoc_contents(body, lexer);
         }
         _ => {}
