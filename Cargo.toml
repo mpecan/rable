@@ -22,6 +22,10 @@ python = ["pyo3"]
 name = "rable"
 crate-type = ["lib", "cdylib"]
 
+[dev-dependencies]
+tree-sitter = "0.26"
+tree-sitter-bash = "0.25"
+
 [lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"

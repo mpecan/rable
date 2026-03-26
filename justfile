@@ -89,6 +89,10 @@ fuzz-minimize input: develop _install-parable
 fuzz-generate-tests: develop
     .venv/bin/python3 tests/generate_oracle_tests.py
 
+# Compare rable vs tree-sitter-bash accuracy (VERBOSE=1 for details)
+compare-tree-sitter:
+    cargo test compare_parsers -- --nocapture
+
 # Run the oracle test suite (aspirational — does not fail build)
 test-oracle:
     cargo test oracle_test_suite -- --nocapture
