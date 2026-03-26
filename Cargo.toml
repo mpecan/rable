@@ -1,6 +1,6 @@
 [package]
 name = "rable"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/mpecan/rable"
@@ -21,10 +21,6 @@ python = ["pyo3"]
 [lib]
 name = "rable"
 crate-type = ["lib", "cdylib"]
-
-[dev-dependencies]
-tree-sitter = "0.26"
-tree-sitter-bash = "0.25"
 
 [lints.clippy]
 unwrap_used = "deny"
