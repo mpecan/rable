@@ -26,13 +26,19 @@ pub enum WordSegment {
     CommandSubstitution(String),
     /// Process substitution `>(...)` or `<(...)` — direction + content.
     ProcessSubstitution(char, String),
+    /// Parameter expansion `${...}` — raw text includes `${` and `}`.
+    ParamExpansion(String),
+    /// Simple variable `$var` — raw text includes `$` prefix.
+    SimpleVar(String),
 }
 
 /// Formats word segments into S-expression output.
 pub fn write_word_segments(f: &mut fmt::Formatter<'_>, segments: &[WordSegment]) -> fmt::Result {
     for seg in segments {
         match seg {
-            WordSegment::Literal(text) => {
+            WordSegment::Literal(text)
+            | WordSegment::ParamExpansion(text)
+            | WordSegment::SimpleVar(text) => {
                 for ch in text.chars() {
                     write_escaped_char(f, ch)?;
                 }
@@ -98,8 +104,25 @@ pub fn segments_from_spans(
     value: &str,
     spans: &[crate::lexer::word_builder::WordSpan],
 ) -> Vec<WordSegment> {
+    build_segments(value, spans, is_sexp_relevant)
+}
+
+/// Like `segments_from_spans` but also decomposes parameter expansions
+/// and simple variables into their own segments (for `Word.parts`).
+pub fn segments_with_params(
+    value: &str,
+    spans: &[crate::lexer::word_builder::WordSpan],
+) -> Vec<WordSegment> {
+    build_segments(value, spans, is_decomposable)
+}
+
+fn build_segments(
+    value: &str,
+    spans: &[crate::lexer::word_builder::WordSpan],
+    filter: fn(&crate::lexer::word_builder::WordSpanKind) -> bool,
+) -> Vec<WordSegment> {
     use crate::lexer::word_builder::{QuotingContext, WordSpanKind};
-    let top_level = collect_top_level_sexp_spans(spans);
+    let top_level = collect_filtered_spans(spans, filter);
     let mut segments = Vec::new();
     let mut pos = 0;
     for span in &top_level {
@@ -137,7 +160,17 @@ pub fn segments_from_spans(
                     }
                 }
             }
-            _ => {} // filtered out by is_sexp_relevant
+            WordSpanKind::ParamExpansion => {
+                if let Some(text) = value.get(span.start..span.end) {
+                    segments.push(WordSegment::ParamExpansion(text.to_string()));
+                }
+            }
+            WordSpanKind::SimpleVar => {
+                if let Some(text) = value.get(span.start..span.end) {
+                    segments.push(WordSegment::SimpleVar(text.to_string()));
+                }
+            }
+            _ => {} // filtered out by span filter
         }
         pos = span.end;
     }
@@ -204,13 +237,22 @@ const fn is_sexp_relevant(kind: &crate::lexer::word_builder::WordSpanKind) -> bo
     )
 }
 
-/// Collects top-level sexp-relevant spans sorted by start offset.
-/// A span is top-level if no other sexp-relevant span fully contains it.
-fn collect_top_level_sexp_spans(
+/// Sexp-relevant spans plus parameter expansions and simple variables.
+const fn is_decomposable(kind: &crate::lexer::word_builder::WordSpanKind) -> bool {
+    use crate::lexer::word_builder::WordSpanKind;
+    if is_sexp_relevant(kind) {
+        return true;
+    }
+    matches!(kind, WordSpanKind::ParamExpansion | WordSpanKind::SimpleVar)
+}
+
+/// Collects top-level spans matching `filter`, sorted by start offset.
+/// A span is top-level if no other matching span fully contains it.
+fn collect_filtered_spans(
     spans: &[crate::lexer::word_builder::WordSpan],
+    filter: fn(&crate::lexer::word_builder::WordSpanKind) -> bool,
 ) -> Vec<&crate::lexer::word_builder::WordSpan> {
-    // Collect sexp-relevant spans sorted by start offset
-    let mut relevant: Vec<_> = spans.iter().filter(|s| is_sexp_relevant(&s.kind)).collect();
+    let mut relevant: Vec<_> = spans.iter().filter(|s| filter(&s.kind)).collect();
     relevant.sort_by_key(|s| s.start);
     // Single pass: skip spans nested inside a previously collected one
     let mut result = Vec::new();

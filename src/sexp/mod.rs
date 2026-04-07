@@ -735,6 +735,9 @@ fn write_redirect_segments(
                 }
                 write!(f, ")")?;
             }
+            word::WordSegment::ParamExpansion(text) | word::WordSegment::SimpleVar(text) => {
+                write!(f, "{text}")?;
+            }
         }
     }
     Ok(())
