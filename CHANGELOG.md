@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.10](https://github.com/mpecan/rable/compare/rable-v0.1.9...rable-v0.1.10) (2026-04-07)
+
+
+### Features
+
+* recognize brace expansion patterns in Word.parts ([fef69dc](https://github.com/mpecan/rable/commit/fef69dce65847c3e67059f97ec44d5bacaac9db6))
+* recognize brace expansion patterns in Word.parts ([#18](https://github.com/mpecan/rable/issues/18)) ([c9fd580](https://github.com/mpecan/rable/commit/c9fd580d379cd518dbf8d33e633e29be5fa90246))
+
 ## [0.1.9](https://github.com/mpecan/rable/compare/rable-v0.1.8...rable-v0.1.9) (2026-04-07)
 
 

@@ -198,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "rable"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "pyo3",
  "thiserror",
