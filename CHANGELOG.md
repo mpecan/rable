@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.9](https://github.com/mpecan/rable/compare/rable-v0.1.8...rable-v0.1.9) (2026-04-07)
+
+
+### Features
+
+* decompose parameter expansions into Word.parts ([b0ad648](https://github.com/mpecan/rable/commit/b0ad64831b8fdafee3d466fa4193b720c742185c))
+* decompose parameter expansions into Word.parts ([#17](https://github.com/mpecan/rable/issues/17)) ([ded6897](https://github.com/mpecan/rable/commit/ded6897868f4dab44170c5a3a01052fcb6b6e976))
+
+
+### Bug Fixes
+
+* resolve clippy errors in tree-sitter comparison test ([789da4d](https://github.com/mpecan/rable/commit/789da4d1b39a6afc8776fc73dd7933fcad9b4abe))
+* resolve clippy errors in tree-sitter comparison test ([#15](https://github.com/mpecan/rable/issues/15)) ([26570f9](https://github.com/mpecan/rable/commit/26570f9968ac94e68a9534550db956ce94aff382))
+
 ## [0.1.8](https://github.com/mpecan/rable/compare/rable-v0.1.7...rable-v0.1.8) (2026-03-25)
 
 
