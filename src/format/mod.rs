@@ -605,6 +605,9 @@ fn process_word_value(value: &str, spans: &[crate::lexer::word_builder::WordSpan
                 }
                 result.push(')');
             }
+            WordSegment::ParamExpansion(text) | WordSegment::SimpleVar(text) => {
+                result.push_str(text);
+            }
         }
     }
     result

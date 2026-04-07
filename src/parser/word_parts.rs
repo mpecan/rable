@@ -7,7 +7,7 @@ use std::cell::Cell;
 
 use crate::ast::{ListItem, Node, NodeKind, Span};
 use crate::lexer::word_builder::WordSpan;
-use crate::sexp::word::{WordSegment, segments_from_spans};
+use crate::sexp::word::{WordSegment, segments_with_params};
 
 thread_local! {
     static DECOMPOSE_DEPTH: Cell<usize> = const { Cell::new(0) };
@@ -44,7 +44,7 @@ impl Drop for DepthGuard {
 /// Decomposes a word using lexer spans — the primary path for all
 /// token-derived words.
 pub(super) fn decompose_word_with_spans(value: &str, spans: &[WordSpan]) -> Vec<Node> {
-    let segments = segments_from_spans(value, spans);
+    let segments = segments_with_params(value, spans);
     segments.into_iter().map(segment_to_node).collect()
 }
 
@@ -65,6 +65,8 @@ fn segment_to_node(seg: WordSegment) -> Node {
         WordSegment::ProcessSubstitution(direction, content) => {
             procsub_to_node(direction, &content)
         }
+        WordSegment::SimpleVar(text) => parse_simple_var(&text),
+        WordSegment::ParamExpansion(text) => parse_braced_param(&text),
     }
 }
 
@@ -128,6 +130,157 @@ fn wrap_nodes(mut nodes: Vec<Node>) -> Node {
     }
 }
 
+/// Parses `$var` — strip leading `$`, remainder is the param name.
+fn parse_simple_var(text: &str) -> Node {
+    let param = text.get(1..).unwrap_or("");
+    Node::empty(NodeKind::ParamExpansion {
+        param: param.to_string(),
+        op: None,
+        arg: None,
+    })
+}
+
+/// Parses `${...}` — strip `${` and `}`, dispatch on inner content.
+fn parse_braced_param(text: &str) -> Node {
+    let inner = match text.get(2..text.len().saturating_sub(1)) {
+        Some(s) if !s.is_empty() => s,
+        _ => return literal_fallback(text),
+    };
+    parse_param_inner(inner)
+}
+
+/// Dispatches based on the first character of the inner `${...}` content.
+fn parse_param_inner(inner: &str) -> Node {
+    let first = inner.as_bytes().first().copied();
+    match first {
+        // ${#...} — length prefix, unless inner is just "#" (special param)
+        Some(b'#') if inner.len() > 1 => parse_length_prefix(&inner[1..]),
+        // ${!...} — indirect prefix, unless inner is just "!" (special param)
+        Some(b'!') if inner.len() > 1 => parse_indirect_prefix(&inner[1..]),
+        _ => parse_plain_param(inner),
+    }
+}
+
+/// Parses `${#var}` — the content after `#` is the param name.
+fn parse_length_prefix(after_hash: &str) -> Node {
+    let (param, _) = split_param_and_rest(after_hash);
+    Node::empty(NodeKind::ParamLength {
+        param: param.to_string(),
+    })
+}
+
+/// Parses `${!var}` or `${!var:-default}`.
+fn parse_indirect_prefix(after_bang: &str) -> Node {
+    let (param, op, arg) = extract_param_op_arg(after_bang);
+    Node::empty(NodeKind::ParamIndirect { param, op, arg })
+}
+
+/// Parses `${var}` or `${var:-default}`.
+fn parse_plain_param(inner: &str) -> Node {
+    let (param, op, arg) = extract_param_op_arg(inner);
+    Node::empty(NodeKind::ParamExpansion { param, op, arg })
+}
+
+/// Shared extraction: splits param name, operator, and argument.
+fn extract_param_op_arg(s: &str) -> (String, Option<String>, Option<String>) {
+    let (param, rest) = split_param_and_rest(s);
+    let (op, arg) = parse_op_and_arg(rest);
+    (param.to_string(), op, arg)
+}
+
+/// Splits a parameter name from the remainder. Handles identifiers,
+/// special single-char params, digits, and array subscripts.
+fn split_param_and_rest(s: &str) -> (&str, &str) {
+    if s.is_empty() {
+        return ("", "");
+    }
+    let bytes = s.as_bytes();
+    // Special single-char params: @, *, ?, -, $, !, #
+    if matches!(bytes[0], b'@' | b'*' | b'?' | b'-' | b'$' | b'!' | b'#') {
+        return (&s[..1], &s[1..]);
+    }
+    // Digit-only positional params (e.g., "0", "10", "100")
+    if bytes[0].is_ascii_digit() {
+        let end = bytes
+            .iter()
+            .position(|b| !b.is_ascii_digit())
+            .unwrap_or(s.len());
+        return maybe_with_subscript(s, end);
+    }
+    // Identifier: [a-zA-Z_][a-zA-Z0-9_]*
+    if bytes[0].is_ascii_alphabetic() || bytes[0] == b'_' {
+        let end = bytes
+            .iter()
+            .position(|b| !b.is_ascii_alphanumeric() && *b != b'_')
+            .unwrap_or(s.len());
+        return maybe_with_subscript(s, end);
+    }
+    // Unknown — treat entire string as param
+    (s, "")
+}
+
+/// If the character at `name_end` is `[`, extend to include the subscript.
+fn maybe_with_subscript(s: &str, name_end: usize) -> (&str, &str) {
+    if s.as_bytes().get(name_end) == Some(&b'[')
+        && let Some(bracket_len) = find_matching_bracket(&s[name_end..])
+    {
+        let end = name_end + bracket_len + 1;
+        return (&s[..end], &s[end..]);
+    }
+    (&s[..name_end], &s[name_end..])
+}
+
+/// Finds the matching `]` for a `[` at position 0, returning the index
+/// of `]` relative to the input. Handles nested brackets.
+fn find_matching_bracket(s: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Known parameter expansion operators, longest-match-first.
+const OPERATORS: &[&str] = &[
+    ":-", ":=", ":+", ":?", // colon-prefixed defaults
+    "-", "=", "+", "?", // plain defaults
+    "##", "#", // prefix removal
+    "%%", "%", // suffix removal
+    "//", "/#", "/%", "/", // substitution
+    "^^", "^", // uppercase
+    ",,", ",", // lowercase
+    "@", // transformation
+    ":", // substring
+];
+
+/// Extracts operator and argument from the remainder after the param name.
+fn parse_op_and_arg(s: &str) -> (Option<String>, Option<String>) {
+    if s.is_empty() {
+        return (None, None);
+    }
+    for op in OPERATORS {
+        if let Some(arg) = s.strip_prefix(op) {
+            let arg_opt = if arg.is_empty() {
+                None
+            } else {
+                Some(arg.to_string())
+            };
+            return (Some((*op).to_string()), arg_opt);
+        }
+    }
+    // Unknown operator — treat entire remainder as op
+    (Some(s.to_string()), None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,12 +304,158 @@ mod tests {
     }
 
     #[test]
-    fn simple_variable_stays_literal() {
+    fn simple_variable_expansion() {
         let parts = decompose("$foo");
         assert_eq!(parts.len(), 1);
         assert!(matches!(
             &parts[0].kind,
-            NodeKind::WordLiteral { value } if value == "$foo"
+            NodeKind::ParamExpansion { param, op, arg }
+            if param == "foo" && op.is_none() && arg.is_none()
+        ));
+    }
+
+    #[test]
+    fn braced_variable_expansion() {
+        let parts = decompose("${foo}");
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::ParamExpansion { param, op, arg }
+            if param == "foo" && op.is_none() && arg.is_none()
+        ));
+    }
+
+    #[test]
+    fn param_with_default() {
+        let parts = decompose("${foo:-default}");
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::ParamExpansion { param, op, arg }
+            if param == "foo"
+                && op.as_deref() == Some(":-")
+                && arg.as_deref() == Some("default")
+        ));
+    }
+
+    #[test]
+    fn param_length() {
+        let parts = decompose("${#foo}");
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::ParamLength { param } if param == "foo"
+        ));
+    }
+
+    #[test]
+    fn param_indirect() {
+        let parts = decompose("${!foo}");
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::ParamIndirect { param, op, arg }
+            if param == "foo" && op.is_none() && arg.is_none()
+        ));
+    }
+
+    #[test]
+    fn special_param_question_mark() {
+        let parts = decompose("$?");
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::ParamExpansion { param, op, arg }
+            if param == "?" && op.is_none() && arg.is_none()
+        ));
+    }
+
+    #[test]
+    fn positional_param() {
+        let parts = decompose("$1");
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::ParamExpansion { param, op, arg }
+            if param == "1" && op.is_none() && arg.is_none()
+        ));
+    }
+
+    #[test]
+    fn multi_digit_positional() {
+        let parts = decompose("${10}");
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::ParamExpansion { param, op, arg }
+            if param == "10" && op.is_none() && arg.is_none()
+        ));
+    }
+
+    #[test]
+    fn prefix_removal_operator() {
+        let parts = decompose("${foo##pattern}");
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::ParamExpansion { param, op, arg }
+            if param == "foo"
+                && op.as_deref() == Some("##")
+                && arg.as_deref() == Some("pattern")
+        ));
+    }
+
+    #[test]
+    fn special_param_hash_braced() {
+        // ${#} is the special param "#", NOT ParamLength
+        let parts = decompose("${#}");
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::ParamExpansion { param, op, arg }
+            if param == "#" && op.is_none() && arg.is_none()
+        ));
+    }
+
+    #[test]
+    fn mixed_text_and_param() {
+        let parts = decompose("hello${world}end");
+        assert_eq!(parts.len(), 3);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::WordLiteral { value } if value == "hello"
+        ));
+        assert!(matches!(
+            &parts[1].kind,
+            NodeKind::ParamExpansion { param, .. } if param == "world"
+        ));
+        assert!(matches!(
+            &parts[2].kind,
+            NodeKind::WordLiteral { value } if value == "end"
+        ));
+    }
+
+    #[test]
+    fn array_subscript() {
+        let parts = decompose("${arr[@]}");
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::ParamExpansion { param, op, arg }
+            if param == "arr[@]" && op.is_none() && arg.is_none()
+        ));
+    }
+
+    #[test]
+    fn indirect_with_operator() {
+        let parts = decompose("${!foo:-bar}");
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::ParamIndirect { param, op, arg }
+            if param == "foo"
+                && op.as_deref() == Some(":-")
+                && arg.as_deref() == Some("bar")
         ));
     }
 
