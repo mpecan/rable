@@ -30,6 +30,8 @@ pub enum WordSegment {
     ParamExpansion(String),
     /// Simple variable `$var` — raw text includes `$` prefix.
     SimpleVar(String),
+    /// Brace expansion `{a,b,c}` or `{1..10}` — raw text includes braces.
+    BraceExpansion(String),
 }
 
 /// Formats word segments into S-expression output.
@@ -38,7 +40,8 @@ pub fn write_word_segments(f: &mut fmt::Formatter<'_>, segments: &[WordSegment])
         match seg {
             WordSegment::Literal(text)
             | WordSegment::ParamExpansion(text)
-            | WordSegment::SimpleVar(text) => {
+            | WordSegment::SimpleVar(text)
+            | WordSegment::BraceExpansion(text) => {
                 for ch in text.chars() {
                     write_escaped_char(f, ch)?;
                 }
@@ -121,7 +124,6 @@ fn build_segments(
     spans: &[crate::lexer::word_builder::WordSpan],
     filter: fn(&crate::lexer::word_builder::WordSpanKind) -> bool,
 ) -> Vec<WordSegment> {
-    use crate::lexer::word_builder::{QuotingContext, WordSpanKind};
     let top_level = collect_filtered_spans(spans, filter);
     let mut segments = Vec::new();
     let mut pos = 0;
@@ -131,47 +133,7 @@ fn build_segments(
         {
             segments.push(WordSegment::Literal(text.to_string()));
         }
-        match &span.kind {
-            WordSpanKind::CommandSub => {
-                if let Some(c) = value.get(span.start + 2..span.end - 1) {
-                    segments.push(WordSegment::CommandSubstitution(c.to_string()));
-                }
-            }
-            WordSpanKind::ProcessSub(dir) => {
-                if let Some(c) = value.get(span.start + 2..span.end - 1) {
-                    segments.push(WordSegment::ProcessSubstitution(*dir, c.to_string()));
-                }
-            }
-            WordSpanKind::AnsiCQuote => {
-                push_ansi_c_span(&mut segments, value, span);
-            }
-            WordSpanKind::LocaleString => {
-                match span.context {
-                    QuotingContext::DoubleQuote => {
-                        // $"..." inside "..." is literal (not a locale string)
-                        if let Some(text) = value.get(span.start..span.end) {
-                            push_literal(&mut segments, text);
-                        }
-                    }
-                    _ => {
-                        if let Some(c) = value.get(span.start + 1..span.end) {
-                            segments.push(WordSegment::LocaleString(c.to_string()));
-                        }
-                    }
-                }
-            }
-            WordSpanKind::ParamExpansion => {
-                if let Some(text) = value.get(span.start..span.end) {
-                    segments.push(WordSegment::ParamExpansion(text.to_string()));
-                }
-            }
-            WordSpanKind::SimpleVar => {
-                if let Some(text) = value.get(span.start..span.end) {
-                    segments.push(WordSegment::SimpleVar(text.to_string()));
-                }
-            }
-            _ => {} // filtered out by span filter
-        }
+        span_to_segment(&mut segments, value, span);
         pos = span.end;
     }
     if pos < value.len()
@@ -180,6 +142,57 @@ fn build_segments(
         segments.push(WordSegment::Literal(text.to_string()));
     }
     segments
+}
+
+/// Converts a single span into the appropriate `WordSegment` and appends it.
+fn span_to_segment(
+    segments: &mut Vec<WordSegment>,
+    value: &str,
+    span: &crate::lexer::word_builder::WordSpan,
+) {
+    use crate::lexer::word_builder::{QuotingContext, WordSpanKind};
+    match &span.kind {
+        WordSpanKind::CommandSub => {
+            if let Some(c) = value.get(span.start + 2..span.end - 1) {
+                segments.push(WordSegment::CommandSubstitution(c.to_string()));
+            }
+        }
+        WordSpanKind::ProcessSub(dir) => {
+            if let Some(c) = value.get(span.start + 2..span.end - 1) {
+                segments.push(WordSegment::ProcessSubstitution(*dir, c.to_string()));
+            }
+        }
+        WordSpanKind::AnsiCQuote => {
+            push_ansi_c_span(segments, value, span);
+        }
+        WordSpanKind::LocaleString => {
+            match span.context {
+                QuotingContext::DoubleQuote => {
+                    // $"..." inside "..." is literal (not a locale string)
+                    if let Some(text) = value.get(span.start..span.end) {
+                        push_literal(segments, text);
+                    }
+                }
+                _ => {
+                    if let Some(c) = value.get(span.start + 1..span.end) {
+                        segments.push(WordSegment::LocaleString(c.to_string()));
+                    }
+                }
+            }
+        }
+        WordSpanKind::ParamExpansion | WordSpanKind::SimpleVar | WordSpanKind::BraceExpansion => {
+            if let Some(text) = value.get(span.start..span.end) {
+                let seg = match &span.kind {
+                    WordSpanKind::ParamExpansion => WordSegment::ParamExpansion,
+                    WordSpanKind::SimpleVar => WordSegment::SimpleVar,
+                    WordSpanKind::BraceExpansion => WordSegment::BraceExpansion,
+                    _ => unreachable!(),
+                };
+                segments.push(seg(text.to_string()));
+            }
+        }
+        _ => {} // filtered out by span filter
+    }
 }
 
 /// Handles `$'...'` spans with context-sensitive behavior:
@@ -243,7 +256,10 @@ const fn is_decomposable(kind: &crate::lexer::word_builder::WordSpanKind) -> boo
     if is_sexp_relevant(kind) {
         return true;
     }
-    matches!(kind, WordSpanKind::ParamExpansion | WordSpanKind::SimpleVar)
+    matches!(
+        kind,
+        WordSpanKind::ParamExpansion | WordSpanKind::SimpleVar | WordSpanKind::BraceExpansion
+    )
 }
 
 /// Collects top-level spans matching `filter`, sorted by start offset.

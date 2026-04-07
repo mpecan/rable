@@ -1,6 +1,7 @@
 use crate::error::{RableError, Result};
 use crate::token::{Token, TokenType};
 
+mod brace_expansion;
 mod expansions;
 mod heredoc;
 mod operators;
