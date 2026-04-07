@@ -224,6 +224,9 @@ pub enum NodeKind {
     /// Locale string: `$"..."`
     LocaleString { content: String },
 
+    /// Brace expansion: `{a,b,c}` or `{1..10}`.
+    BraceExpansion { content: String },
+
     /// Arithmetic expansion: `$(( expr ))`
     ArithmeticExpansion { expression: Option<Box<Node>> },
 

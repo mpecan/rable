@@ -68,6 +68,8 @@ impl Lexer {
             }
         }
 
+        super::brace_expansion::detect_brace_expansions(&mut wb);
+
         if wb.is_empty() {
             return Err(RableError::parse("unexpected character", start, line));
         }

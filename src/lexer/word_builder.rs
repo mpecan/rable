@@ -148,4 +148,6 @@ pub enum WordSpanKind {
     DeprecatedArith,
     /// Backslash escape: `\X` (not `\<newline>` line continuations).
     Escape,
+    /// Brace expansion: `{a,b,c}` or `{1..10}`.
+    BraceExpansion,
 }

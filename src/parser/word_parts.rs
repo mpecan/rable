@@ -67,6 +67,9 @@ fn segment_to_node(seg: WordSegment) -> Node {
         }
         WordSegment::SimpleVar(text) => parse_simple_var(&text),
         WordSegment::ParamExpansion(text) => parse_braced_param(&text),
+        WordSegment::BraceExpansion(text) => {
+            Node::empty(NodeKind::BraceExpansion { content: text })
+        }
     }
 }
 
@@ -515,6 +518,44 @@ mod tests {
         assert!(matches!(
             &parts[0].kind,
             NodeKind::LocaleString { content } if content == "\"hello\""
+        ));
+    }
+
+    #[test]
+    fn brace_expansion_comma() {
+        let parts = decompose("{a,b,c}");
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::BraceExpansion { content } if content == "{a,b,c}"
+        ));
+    }
+
+    #[test]
+    fn brace_expansion_range() {
+        let parts = decompose("{1..10}");
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::BraceExpansion { content } if content == "{1..10}"
+        ));
+    }
+
+    #[test]
+    fn brace_expansion_mid_word() {
+        let parts = decompose("file{1,2}.txt");
+        assert_eq!(parts.len(), 3);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::WordLiteral { value } if value == "file"
+        ));
+        assert!(matches!(
+            &parts[1].kind,
+            NodeKind::BraceExpansion { content } if content == "{1,2}"
+        ));
+        assert!(matches!(
+            &parts[2].kind,
+            NodeKind::WordLiteral { value } if value == ".txt"
         ));
     }
 }

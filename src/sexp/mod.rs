@@ -160,6 +160,7 @@ impl fmt::Display for NodeKind {
             }
             Self::AnsiCQuote { content } => write!(f, "$'{content}'"),
             Self::LocaleString { content } => write!(f, "$\"{content}\""),
+            Self::BraceExpansion { content } => write!(f, "{content}"),
             Self::ArithmeticExpansion { expression } => {
                 write_arith_wrapper(f, "arith", expression.as_deref())
             }
@@ -735,7 +736,9 @@ fn write_redirect_segments(
                 }
                 write!(f, ")")?;
             }
-            word::WordSegment::ParamExpansion(text) | word::WordSegment::SimpleVar(text) => {
+            word::WordSegment::ParamExpansion(text)
+            | word::WordSegment::SimpleVar(text)
+            | word::WordSegment::BraceExpansion(text) => {
                 write!(f, "{text}")?;
             }
         }
