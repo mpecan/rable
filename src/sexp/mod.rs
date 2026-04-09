@@ -158,8 +158,8 @@ impl fmt::Display for NodeKind {
             Self::ProcessSubstitution { direction, command } => {
                 write!(f, "(procsub {direction} {command})")
             }
-            Self::AnsiCQuote { content } => write!(f, "$'{content}'"),
-            Self::LocaleString { content } => write!(f, "$\"{content}\""),
+            Self::AnsiCQuote { content, .. } => write!(f, "$'{content}'"),
+            Self::LocaleString { content, .. } => write!(f, "$\"{content}\""),
             Self::BraceExpansion { content } => write!(f, "{content}"),
             Self::ArithmeticExpansion { expression } => {
                 write_arith_wrapper(f, "arith", expression.as_deref())
@@ -740,6 +740,12 @@ fn write_redirect_segments(
             | word::WordSegment::SimpleVar(text)
             | word::WordSegment::BraceExpansion(text) => {
                 write!(f, "{text}")?;
+            }
+            word::WordSegment::ArithmeticSub(inner) => {
+                // Defensive: redirect target segments come from the sexp
+                // filter which excludes `ArithmeticSub`. If it ever does
+                // arrive here, reproduce the original `$((...))` text.
+                write!(f, "$(({inner}))")?;
             }
         }
     }

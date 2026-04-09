@@ -1,3 +1,4 @@
+mod arithmetic;
 mod compound;
 mod conditional;
 pub mod helpers;

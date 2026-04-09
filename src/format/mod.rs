@@ -610,6 +610,15 @@ fn process_word_value(value: &str, spans: &[crate::lexer::word_builder::WordSpan
             | WordSegment::BraceExpansion(text) => {
                 result.push_str(text);
             }
+            WordSegment::ArithmeticSub(inner) => {
+                // Defensive: `segments_from_spans` uses the sexp filter
+                // which excludes `ArithmeticSub`, so this arm is
+                // unreachable in practice. Preserve the original text if
+                // it ever does fire.
+                result.push_str("$((");
+                result.push_str(inner);
+                result.push_str("))");
+            }
         }
     }
     result

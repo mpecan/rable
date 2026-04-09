@@ -218,11 +218,22 @@ pub enum NodeKind {
         command: Box<Node>,
     },
 
-    /// ANSI-C quoting: `$'...'`
-    AnsiCQuote { content: String },
+    /// ANSI-C quoting: `$'...'`.
+    ///
+    /// `content` is the raw inner text including backslash escape sequences
+    /// (e.g. `foo\nbar` is stored as the literal 9-character string).
+    /// `decoded` is the same text with escapes processed per the bash manual
+    /// (e.g. `\n` becomes an actual newline, `\x41` becomes `A`) so consumers
+    /// can statically resolve the quoted value without re-parsing escapes.
+    AnsiCQuote { content: String, decoded: String },
 
-    /// Locale string: `$"..."`
-    LocaleString { content: String },
+    /// Locale string: `$"..."`.
+    ///
+    /// `content` is the raw inner text **including** the surrounding double
+    /// quotes (for backwards-compatible S-expression output). `inner` is the
+    /// same text with the outer pair of double quotes stripped so consumers
+    /// can treat it as a plain translatable string.
+    LocaleString { content: String, inner: String },
 
     /// Brace expansion: `{a,b,c}` or `{1..10}`.
     BraceExpansion { content: String },
