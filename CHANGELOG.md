@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.12](https://github.com/mpecan/rable/compare/rable-v0.1.11...rable-v0.1.12) (2026-04-09)
+
+
+### Code Refactoring
+
+* enforce 500/700 file length limits and decompose large modules ([#22](https://github.com/mpecan/rable/issues/22)) ([0b317c5](https://github.com/mpecan/rable/commit/0b317c5860b81a98d31b64d221dfa420f1756be4))
+* **format:** split mod.rs into topic helper files ([4218a61](https://github.com/mpecan/rable/commit/4218a6173a261b8edd375b74f96f62b6bb2309a9))
+* **parser:** split arithmetic.rs into topic submodules ([0959cfa](https://github.com/mpecan/rable/commit/0959cfa47a1a3343801ba45013d00f286ccc62da))
+* **parser:** split mod.rs and compound.rs into topic files ([6c74954](https://github.com/mpecan/rable/commit/6c749544c17ab07a396bca3dc9b930ae804a163f))
+* **parser:** split word_parts.rs into topic submodules ([54a796f](https://github.com/mpecan/rable/commit/54a796f860b8775a0285d0174c13fdd697408094))
+* **sexp:** split mod.rs into topic helper files ([8d1a4e2](https://github.com/mpecan/rable/commit/8d1a4e24965f02541b0f919a2f59f262ab8108e7))
+
 ## [0.1.11](https://github.com/mpecan/rable/compare/rable-v0.1.10...rable-v0.1.11) (2026-04-09)
 
 
