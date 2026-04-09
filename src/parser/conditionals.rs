@@ -1,15 +1,78 @@
-//! Conditional expression parser for `[[ ... ]]`.
+//! Conditional statements: `if`/`elif`/`else`/`fi` and `[[ … ]]` expressions.
 
 use crate::ast::{Node, NodeKind, Span};
 use crate::error::Result;
 use crate::token::{Token, TokenType};
 
-use super::{
-    Parser,
-    helpers::{cond_term_from_token, is_cond_binary_op},
-};
+use super::Parser;
+use super::helpers::{cond_term_from_token, is_cond_binary_op};
 
 impl Parser {
+    pub(super) fn parse_if(&mut self) -> Result<Node> {
+        let start = self.peek_pos()?;
+        self.expect(TokenType::If)?;
+        self.skip_newlines()?;
+        let condition = self.parse_list()?;
+        self.expect(TokenType::Then)?;
+        self.skip_newlines()?;
+        let then_body = self.parse_list()?;
+
+        let else_body = if self.peek_is(TokenType::Elif)? {
+            Some(Box::new(self.parse_elif()?))
+        } else if self.peek_is(TokenType::Else)? {
+            self.lexer.next_token()?;
+            self.skip_newlines()?;
+            Some(Box::new(self.parse_list()?))
+        } else {
+            None
+        };
+
+        self.expect(TokenType::Fi)?;
+        let redirects = self.parse_trailing_redirects()?;
+
+        Ok(self.spanned(
+            start,
+            NodeKind::If {
+                condition: Box::new(condition),
+                then_body: Box::new(then_body),
+                else_body,
+                redirects,
+            },
+        ))
+    }
+
+    fn parse_elif(&mut self) -> Result<Node> {
+        let start = self.peek_pos()?;
+        self.enter()?;
+        self.expect(TokenType::Elif)?;
+        self.skip_newlines()?;
+        let condition = self.parse_list()?;
+        self.expect(TokenType::Then)?;
+        self.skip_newlines()?;
+        let then_body = self.parse_list()?;
+
+        let else_body = if self.peek_is(TokenType::Elif)? {
+            Some(Box::new(self.parse_elif()?))
+        } else if self.peek_is(TokenType::Else)? {
+            self.lexer.next_token()?;
+            self.skip_newlines()?;
+            Some(Box::new(self.parse_list()?))
+        } else {
+            None
+        };
+
+        self.leave();
+        Ok(self.spanned(
+            start,
+            NodeKind::If {
+                condition: Box::new(condition),
+                then_body: Box::new(then_body),
+                else_body,
+                redirects: Vec::new(),
+            },
+        ))
+    }
+
     pub(super) fn parse_cond_command(&mut self) -> Result<Node> {
         let start = self.peek_pos()?;
         self.expect(TokenType::DoubleLeftBracket)?;

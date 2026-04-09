@@ -1,0 +1,19 @@
+[global]
+exclude = ["target", "tests/parable", "tests/oracle"]
+
+# Enforce a maximum file length. 500 lines is a soft warning; 700 is a
+# hard error. Both limits are tracked by `just check` / `just ci`.
+[rules.file-length]
+level = "warn"
+soft_limit = 500
+hard_limit = 700
+
+# The other `cargo-lint-extra` rules are out of scope for this project —
+# rustfmt already owns line length via `.rustfmt.toml`, and we don't
+# want a comment-density style bot. Disable them explicitly so
+# `cargo lint-extra -W` only fails on file-length violations.
+[rules.line-length]
+level = "allow"
+
+[rules.inline-comments]
+level = "allow"
