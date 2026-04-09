@@ -22,6 +22,11 @@ pub enum WordSegment {
     AnsiCQuote(String),
     /// Locale string `$"..."` — content includes the `"..."` delimiters.
     LocaleString(String),
+    /// Arithmetic substitution `$((...))` — content is the inner expression,
+    /// i.e. the text between `$((` and `))`. Only emitted by
+    /// [`segments_with_params`] (the `Word.parts` path); the sexp path
+    /// leaves `$((...))` as literal text for backwards compatibility.
+    ArithmeticSub(String),
     /// Command substitution `$(...)` — content is between the parens.
     CommandSubstitution(String),
     /// Process substitution `>(...)` or `<(...)` — direction + content.
@@ -37,64 +42,89 @@ pub enum WordSegment {
 /// Formats word segments into S-expression output.
 pub fn write_word_segments(f: &mut fmt::Formatter<'_>, segments: &[WordSegment]) -> fmt::Result {
     for seg in segments {
-        match seg {
-            WordSegment::Literal(text)
-            | WordSegment::ParamExpansion(text)
-            | WordSegment::SimpleVar(text)
-            | WordSegment::BraceExpansion(text) => {
-                for ch in text.chars() {
-                    write_escaped_char(f, ch)?;
-                }
-            }
-            WordSegment::AnsiCQuote(raw_content) => {
-                let chars: Vec<char> = raw_content.chars().collect();
-                let mut pos = 0;
-                let processed = process_ansi_c_content(&chars, &mut pos);
-                write_escaped_word(f, "'")?;
-                write_escaped_word(f, &processed)?;
-                write_escaped_word(f, "'")?;
-            }
-            WordSegment::LocaleString(content) => {
-                // content includes "..." delimiters
-                for ch in content.chars() {
-                    write_escaped_char(f, ch)?;
-                }
-            }
-            WordSegment::CommandSubstitution(content) => {
-                write!(f, "$(")?;
-                if let Some(reformatted) = format::reformat_bash(content) {
-                    // Add space if content starts with ( to avoid $((
-                    if reformatted.starts_with('(') {
-                        write!(f, " ")?;
-                    }
-                    write_escaped_word(f, &reformatted)?;
-                } else {
-                    let normalized = normalize_cmdsub_content(content);
-                    // Add space if content starts with ( to avoid $((
-                    if normalized.starts_with('(') {
-                        write!(f, " ")?;
-                    }
-                    write_escaped_word(f, &normalized)?;
-                }
-                write!(f, ")")?;
-            }
-            WordSegment::ProcessSubstitution(direction, content) => {
-                write!(f, "{direction}(")?;
-                let trimmed = content.trim();
-                // Don't reformat content that starts with ( (subshell inside procsub)
-                if trimmed.starts_with('(') {
-                    write_escaped_word(f, trimmed)?;
-                } else if let Some(reformatted) = format::reformat_bash(content) {
-                    write_escaped_word(f, &reformatted)?;
-                } else {
-                    let normalized = normalize_cmdsub_content(content);
-                    write_escaped_word(f, &normalized)?;
-                }
-                write!(f, ")")?;
-            }
-        }
+        write_one_segment(f, seg)?;
     }
     Ok(())
+}
+
+fn write_one_segment(f: &mut fmt::Formatter<'_>, seg: &WordSegment) -> fmt::Result {
+    match seg {
+        WordSegment::Literal(text)
+        | WordSegment::ParamExpansion(text)
+        | WordSegment::SimpleVar(text)
+        | WordSegment::BraceExpansion(text) => {
+            for ch in text.chars() {
+                write_escaped_char(f, ch)?;
+            }
+            Ok(())
+        }
+        WordSegment::AnsiCQuote(raw_content) => {
+            let chars: Vec<char> = raw_content.chars().collect();
+            let mut pos = 0;
+            let processed = process_ansi_c_content(&chars, &mut pos);
+            write_escaped_word(f, "'")?;
+            write_escaped_word(f, &processed)?;
+            write_escaped_word(f, "'")
+        }
+        WordSegment::LocaleString(content) => {
+            // content includes "..." delimiters
+            for ch in content.chars() {
+                write_escaped_char(f, ch)?;
+            }
+            Ok(())
+        }
+        WordSegment::ArithmeticSub(inner) => {
+            // Defensive: the sexp filter excludes ArithmeticSub so this
+            // branch is unreachable under normal use. If it ever does run,
+            // reproduce the original `$((...))` text so output stays sane.
+            write!(f, "$((")?;
+            for ch in inner.chars() {
+                write_escaped_char(f, ch)?;
+            }
+            write!(f, "))")
+        }
+        WordSegment::CommandSubstitution(content) => write_cmdsub_segment(f, content),
+        WordSegment::ProcessSubstitution(direction, content) => {
+            write_procsub_segment(f, *direction, content)
+        }
+    }
+}
+
+fn write_cmdsub_segment(f: &mut fmt::Formatter<'_>, content: &str) -> fmt::Result {
+    write!(f, "$(")?;
+    if let Some(reformatted) = format::reformat_bash(content) {
+        // Add space if content starts with ( to avoid $((
+        if reformatted.starts_with('(') {
+            write!(f, " ")?;
+        }
+        write_escaped_word(f, &reformatted)?;
+    } else {
+        let normalized = normalize_cmdsub_content(content);
+        if normalized.starts_with('(') {
+            write!(f, " ")?;
+        }
+        write_escaped_word(f, &normalized)?;
+    }
+    write!(f, ")")
+}
+
+fn write_procsub_segment(
+    f: &mut fmt::Formatter<'_>,
+    direction: char,
+    content: &str,
+) -> fmt::Result {
+    write!(f, "{direction}(")?;
+    let trimmed = content.trim();
+    // Don't reformat content that starts with ( (subshell inside procsub)
+    if trimmed.starts_with('(') {
+        write_escaped_word(f, trimmed)?;
+    } else if let Some(reformatted) = format::reformat_bash(content) {
+        write_escaped_word(f, &reformatted)?;
+    } else {
+        let normalized = normalize_cmdsub_content(content);
+        write_escaped_word(f, &normalized)?;
+    }
+    write!(f, ")")
 }
 
 /// Converts lexer spans to segments without re-parsing the value.
@@ -164,6 +194,15 @@ fn span_to_segment(
         }
         WordSpanKind::AnsiCQuote => {
             push_ansi_c_span(segments, value, span);
+        }
+        WordSpanKind::ArithmeticSub => {
+            // `$(( ... ))`: skip `$((` (3 bytes) at the start and `))`
+            // (2 bytes) at the end to extract the inner expression text.
+            if span.end >= span.start + 5
+                && let Some(inner) = value.get(span.start + 3..span.end - 2)
+            {
+                segments.push(WordSegment::ArithmeticSub(inner.to_string()));
+            }
         }
         WordSpanKind::LocaleString => {
             match span.context {
@@ -250,7 +289,13 @@ const fn is_sexp_relevant(kind: &crate::lexer::word_builder::WordSpanKind) -> bo
     )
 }
 
-/// Sexp-relevant spans plus parameter expansions and simple variables.
+/// Sexp-relevant spans plus parameter expansions, simple variables,
+/// brace expansions, and arithmetic substitutions.
+///
+/// `ArithmeticSub` is included here but intentionally NOT in
+/// [`is_sexp_relevant`] — this keeps `$((...))` as literal text in the
+/// S-expression word output (preserving the Parable corpus expectations)
+/// while still exposing a typed `ArithmeticExpansion` node in `Word.parts`.
 const fn is_decomposable(kind: &crate::lexer::word_builder::WordSpanKind) -> bool {
     use crate::lexer::word_builder::WordSpanKind;
     if is_sexp_relevant(kind) {
@@ -258,7 +303,10 @@ const fn is_decomposable(kind: &crate::lexer::word_builder::WordSpanKind) -> boo
     }
     matches!(
         kind,
-        WordSpanKind::ParamExpansion | WordSpanKind::SimpleVar | WordSpanKind::BraceExpansion
+        WordSpanKind::ParamExpansion
+            | WordSpanKind::SimpleVar
+            | WordSpanKind::BraceExpansion
+            | WordSpanKind::ArithmeticSub
     )
 }
 

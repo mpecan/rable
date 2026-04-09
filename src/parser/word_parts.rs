@@ -59,8 +59,15 @@ pub(super) fn decompose_word_literal(value: &str) -> Vec<Node> {
 fn segment_to_node(seg: WordSegment) -> Node {
     match seg {
         WordSegment::Literal(text) => Node::empty(NodeKind::WordLiteral { value: text }),
-        WordSegment::AnsiCQuote(content) => Node::empty(NodeKind::AnsiCQuote { content }),
-        WordSegment::LocaleString(content) => Node::empty(NodeKind::LocaleString { content }),
+        WordSegment::AnsiCQuote(content) => {
+            let decoded = ansi_c_decode(&content);
+            Node::empty(NodeKind::AnsiCQuote { content, decoded })
+        }
+        WordSegment::LocaleString(content) => {
+            let inner = strip_locale_quotes(&content);
+            Node::empty(NodeKind::LocaleString { content, inner })
+        }
+        WordSegment::ArithmeticSub(inner) => arithmetic_sub_to_node(&inner),
         WordSegment::CommandSubstitution(content) => cmdsub_to_node(&content),
         WordSegment::ProcessSubstitution(direction, content) => {
             procsub_to_node(direction, &content)
@@ -71,6 +78,147 @@ fn segment_to_node(seg: WordSegment) -> Node {
             Node::empty(NodeKind::BraceExpansion { content: text })
         }
     }
+}
+
+/// Strips the outer pair of double quotes from a locale-string body.
+///
+/// Locale strings are parsed with the surrounding quotes included (for
+/// backwards-compatible S-expression output); `LocaleString.inner` is
+/// the same text with that outer pair removed so consumers see just the
+/// translatable message.
+fn strip_locale_quotes(content: &str) -> String {
+    content
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .map_or_else(|| content.to_string(), ToString::to_string)
+}
+
+/// Decomposes the inner text of a `$((...))` arithmetic substitution
+/// into a typed `ArithmeticExpansion` node. On parse failure the
+/// `expression` field is left as `None`, matching the existing best-effort
+/// semantics used elsewhere in word decomposition.
+fn arithmetic_sub_to_node(inner: &str) -> Node {
+    let expression = crate::parser::arithmetic::parse_arith_expression(inner)
+        .ok()
+        .map(Box::new);
+    Node::empty(NodeKind::ArithmeticExpansion { expression })
+}
+
+/// Decodes ANSI-C quoted content per the bash manual.
+///
+/// Handles control-char escapes (`\n`, `\t`, etc.), hex/octal/Unicode
+/// byte escapes, `\cX` control characters, and backslash-escaped quote
+/// / backslash / question mark. Unknown escapes pass through as a
+/// backslash followed by the character (matching bash behavior).
+fn ansi_c_decode(raw: &str) -> String {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut out = String::with_capacity(raw.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c != '\\' || i + 1 >= chars.len() {
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        let next = chars[i + 1];
+        if let Some(simple) = decode_simple_escape(next) {
+            out.push(simple);
+            i += 2;
+            continue;
+        }
+        if let Some((ch, consumed)) = decode_numeric_escape(&chars, i + 1) {
+            out.push(ch);
+            i += 1 + consumed;
+            continue;
+        }
+        // Unknown escape — pass through as `\X`.
+        out.push('\\');
+        out.push(next);
+        i += 2;
+    }
+    out
+}
+
+/// Handles `\a \b \e \E \f \n \r \t \v \\ \' \" \?` per the bash(1) manual.
+const fn decode_simple_escape(next: char) -> Option<char> {
+    Some(match next {
+        'a' => '\u{07}',
+        'b' => '\u{08}',
+        'e' | 'E' => '\u{1B}',
+        'f' => '\u{0C}',
+        'n' => '\n',
+        'r' => '\r',
+        't' => '\t',
+        'v' => '\u{0B}',
+        '\\' => '\\',
+        '\'' => '\'',
+        '"' => '"',
+        '?' => '?',
+        _ => return None,
+    })
+}
+
+/// Numeric / control-character escapes: `\NNN`, `\xHH`, `\uHHHH`,
+/// `\UHHHHHHHH`, `\cX`. Returns the decoded character and the number
+/// of characters consumed *after* the leading backslash.
+fn decode_numeric_escape(chars: &[char], start: usize) -> Option<(char, usize)> {
+    let first = *chars.get(start)?;
+    match first {
+        'x' => take_hex_escape(chars, start + 1, 2).map(|(ch, n)| (ch, n + 1)),
+        'u' => take_hex_escape(chars, start + 1, 4).map(|(ch, n)| (ch, n + 1)),
+        'U' => take_hex_escape(chars, start + 1, 8).map(|(ch, n)| (ch, n + 1)),
+        'c' => take_control_escape(chars, start + 1).map(|(ch, n)| (ch, n + 1)),
+        '0'..='7' => take_octal_escape(chars, start),
+        _ => None,
+    }
+}
+
+fn take_hex_escape(chars: &[char], start: usize, max: usize) -> Option<(char, usize)> {
+    let mut value: u32 = 0;
+    let mut consumed = 0;
+    while consumed < max {
+        let Some(c) = chars.get(start + consumed) else {
+            break;
+        };
+        let Some(digit) = c.to_digit(16) else { break };
+        value = value * 16 + digit;
+        consumed += 1;
+    }
+    if consumed == 0 {
+        return None;
+    }
+    let ch = char::from_u32(value)?;
+    Some((ch, consumed))
+}
+
+fn take_octal_escape(chars: &[char], start: usize) -> Option<(char, usize)> {
+    let mut value: u32 = 0;
+    let mut consumed = 0;
+    while consumed < 3 {
+        let Some(c) = chars.get(start + consumed) else {
+            break;
+        };
+        let Some(digit) = c.to_digit(8) else { break };
+        value = value * 8 + digit;
+        consumed += 1;
+    }
+    if consumed == 0 {
+        return None;
+    }
+    let ch = char::from_u32(value)?;
+    Some((ch, consumed))
+}
+
+fn take_control_escape(chars: &[char], start: usize) -> Option<(char, usize)> {
+    let c = *chars.get(start)?;
+    if !c.is_ascii() {
+        return None;
+    }
+    #[allow(clippy::cast_possible_truncation)]
+    let byte = (c as u32) & 0x1F;
+    let ch = char::from_u32(byte)?;
+    Some((ch, 1))
 }
 
 fn cmdsub_to_node(content: &str) -> Node {
@@ -496,7 +644,7 @@ mod tests {
         assert_eq!(parts.len(), 1);
         assert!(matches!(
             &parts[0].kind,
-            NodeKind::AnsiCQuote { content } if content == "foo\\nbar"
+            NodeKind::AnsiCQuote { content, .. } if content == "foo\\nbar"
         ));
     }
 
@@ -517,7 +665,7 @@ mod tests {
         assert_eq!(parts.len(), 1);
         assert!(matches!(
             &parts[0].kind,
-            NodeKind::LocaleString { content } if content == "\"hello\""
+            NodeKind::LocaleString { content, .. } if content == "\"hello\""
         ));
     }
 
@@ -556,6 +704,163 @@ mod tests {
         assert!(matches!(
             &parts[2].kind,
             NodeKind::WordLiteral { value } if value == ".txt"
+        ));
+    }
+
+    #[test]
+    fn arithmetic_expansion_decomposed() {
+        let parts = decompose("$((1+2))");
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::ArithmeticExpansion {
+                expression: Some(_)
+            }
+        ));
+    }
+
+    #[test]
+    fn arithmetic_with_variable() {
+        let parts = decompose("$((x*2))");
+        assert_eq!(parts.len(), 1);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::ArithmeticExpansion { .. }
+        ));
+    }
+
+    #[test]
+    fn arithmetic_in_mixed_word() {
+        let parts = decompose("file_$((n+1)).txt");
+        assert_eq!(parts.len(), 3);
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::WordLiteral { value } if value == "file_"
+        ));
+        assert!(matches!(
+            &parts[1].kind,
+            NodeKind::ArithmeticExpansion {
+                expression: Some(_)
+            }
+        ));
+        assert!(matches!(
+            &parts[2].kind,
+            NodeKind::WordLiteral { value } if value == ".txt"
+        ));
+    }
+
+    #[test]
+    fn arithmetic_expression_tree_shape() {
+        // `1+2` should parse as `(+ 1 2)` — verifies we're actually
+        // producing a typed sub-AST, not an opaque string blob.
+        let parts = decompose("$((1+2))");
+        let NodeKind::ArithmeticExpansion {
+            expression: Some(expr),
+        } = &parts[0].kind
+        else {
+            unreachable!("expected parsed arithmetic expression");
+        };
+        let NodeKind::ArithBinaryOp { op, left, right } = &expr.kind else {
+            unreachable!("expected binop, got {:?}", expr.kind);
+        };
+        assert_eq!(op, "+");
+        assert!(matches!(&left.kind, NodeKind::ArithNumber { value } if value == "1"));
+        assert!(matches!(&right.kind, NodeKind::ArithNumber { value } if value == "2"));
+    }
+
+    #[test]
+    fn ansi_c_decodes_hex() {
+        let parts = decompose("$'\\x41'");
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::AnsiCQuote { decoded, .. } if decoded == "A"
+        ));
+    }
+
+    #[test]
+    fn ansi_c_decodes_newline() {
+        let parts = decompose("$'line1\\nline2'");
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::AnsiCQuote { decoded, .. } if decoded == "line1\nline2"
+        ));
+    }
+
+    #[test]
+    fn ansi_c_decodes_octal() {
+        // octal 101 = 65 = 'A'
+        let parts = decompose("$'\\101'");
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::AnsiCQuote { decoded, .. } if decoded == "A"
+        ));
+    }
+
+    #[test]
+    fn ansi_c_decodes_unicode() {
+        let parts = decompose("$'\\u0041'");
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::AnsiCQuote { decoded, .. } if decoded == "A"
+        ));
+    }
+
+    #[test]
+    fn ansi_c_decodes_control_char() {
+        // Ctrl-A = 0x01
+        let parts = decompose("$'\\cA'");
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::AnsiCQuote { decoded, .. } if decoded == "\u{01}"
+        ));
+    }
+
+    #[test]
+    fn ansi_c_unknown_escape_passthrough() {
+        let parts = decompose("$'\\z'");
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::AnsiCQuote { decoded, .. } if decoded == "\\z"
+        ));
+    }
+
+    #[test]
+    fn ansi_c_preserves_raw_content() {
+        // Legacy `content` field must remain byte-identical so the
+        // Parable corpus keeps passing.
+        let parts = decompose("$'foo\\nbar'");
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::AnsiCQuote { content, .. } if content == "foo\\nbar"
+        ));
+    }
+
+    #[test]
+    fn locale_string_strips_quotes() {
+        let parts = decompose("$\"hello\"");
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::LocaleString { inner, .. } if inner == "hello"
+        ));
+    }
+
+    #[test]
+    fn locale_string_empty() {
+        let parts = decompose("$\"\"");
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::LocaleString { inner, .. } if inner.is_empty()
+        ));
+    }
+
+    #[test]
+    fn locale_string_preserves_raw_content() {
+        // Legacy `content` field keeps the surrounding quotes so the
+        // Parable corpus keeps passing.
+        let parts = decompose("$\"hello\"");
+        assert!(matches!(
+            &parts[0].kind,
+            NodeKind::LocaleString { content, .. } if content == "\"hello\""
         ));
     }
 }
