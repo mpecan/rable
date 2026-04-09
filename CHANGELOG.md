@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.11](https://github.com/mpecan/rable/compare/rable-v0.1.10...rable-v0.1.11) (2026-04-09)
+
+
+### Features
+
+* decompose arithmetic, ANSI-C, and locale expansions in Word.parts ([9887e56](https://github.com/mpecan/rable/commit/9887e56cde877f470a563694ed0820ba5bce23c6))
+* decompose arithmetic, ANSI-C, and locale expansions in Word.parts ([#20](https://github.com/mpecan/rable/issues/20)) ([95299e9](https://github.com/mpecan/rable/commit/95299e96d7c742ce4c79b4a2e040b3c5173de7ce))
+
 ## [0.1.10](https://github.com/mpecan/rable/compare/rable-v0.1.9...rable-v0.1.10) (2026-04-07)
 
 
