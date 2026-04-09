@@ -4,7 +4,7 @@
 set dotenv-load := false
 
 # Default: run all checks
-default: fmt clippy test
+default: fmt clippy test lint-extra
 
 # --- Development ---
 
@@ -20,6 +20,24 @@ clippy:
 test:
     cargo test --all-targets
 
+# Enforce file length limits (soft 500 / hard 700 via cargo-lint-extra).
+# Configured in .cargo-lint-extra.toml.
+#
+# NOTE: `cargo lint-extra -W` has a bug where it exits 1 even when zero
+# diagnostics are reported, so we can't rely on it for "warnings as errors".
+# Instead: run once for human output, then once with --format json and
+# fail if the output is anything other than `[]`. This catches both soft
+# (warn) and hard (error) file-length violations.
+lint-extra:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo lint-extra
+    diagnostics=$(cargo lint-extra --format json)
+    if [ "$diagnostics" != "[]" ]; then
+        echo "cargo lint-extra reported diagnostics — see output above" >&2
+        exit 1
+    fi
+
 # Run only the Parable compatibility suite with full output
 test-parable:
     cargo test parable_test_suite -- --nocapture
@@ -28,8 +46,8 @@ test-parable:
 test-file name:
     RABLE_TEST={{name}} cargo test parable_test_suite -- --nocapture
 
-# Full pre-commit check: format, lint, test
-check: fmt clippy test
+# Full pre-commit check: format, lint, test, file-length enforcement
+check: fmt clippy test lint-extra
 
 # --- Python Bindings ---
 
@@ -110,7 +128,7 @@ build-oracle:
 # --- CI Helpers ---
 
 # Run exactly what CI runs
-ci: fmt clippy test
+ci: fmt clippy test lint-extra
 
 # Build the Python wheel
 wheel:
