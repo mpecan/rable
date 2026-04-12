@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.13](https://github.com/mpecan/rable/compare/rable-v0.1.12...rable-v0.1.13) (2026-04-12)
+
+
+### Features
+
+* decompose backtick command substitutions into typed AST nodes ([330150b](https://github.com/mpecan/rable/commit/330150be817d3cc8a2c3c340ed4adbab07c11879))
+* decompose backtick command substitutions into typed AST nodes ([#24](https://github.com/mpecan/rable/issues/24)) ([627f5ac](https://github.com/mpecan/rable/commit/627f5acfb726f061ad9b173bb5f695f8afc05c98))
+
 ## [0.1.12](https://github.com/mpecan/rable/compare/rable-v0.1.11...rable-v0.1.12) (2026-04-09)
 
 
