@@ -429,3 +429,65 @@ fn locale_string_preserves_raw_content() {
         NodeKind::LocaleString { content, .. } if content == "\"hello\""
     ));
 }
+
+#[test]
+fn backtick_command_substitution() {
+    let parts = decompose("`date`");
+    assert_eq!(parts.len(), 1);
+    assert!(matches!(
+        &parts[0].kind,
+        NodeKind::CommandSubstitution { brace: false, .. }
+    ));
+}
+
+#[test]
+fn backtick_with_args() {
+    let parts = decompose("`ls -la`");
+    assert_eq!(parts.len(), 1);
+    assert!(matches!(
+        &parts[0].kind,
+        NodeKind::CommandSubstitution { .. }
+    ));
+}
+
+#[test]
+fn backtick_in_mixed_word() {
+    let parts = decompose("prefix`pwd`suffix");
+    assert_eq!(parts.len(), 3);
+    assert!(matches!(
+        &parts[0].kind,
+        NodeKind::WordLiteral { value } if value == "prefix"
+    ));
+    assert!(matches!(
+        &parts[1].kind,
+        NodeKind::CommandSubstitution { .. }
+    ));
+    assert!(matches!(
+        &parts[2].kind,
+        NodeKind::WordLiteral { value } if value == "suffix"
+    ));
+}
+
+#[test]
+fn backtick_empty() {
+    let parts = decompose("``");
+    assert_eq!(parts.len(), 1);
+    assert!(matches!(
+        &parts[0].kind,
+        NodeKind::CommandSubstitution { .. }
+    ));
+}
+
+#[test]
+fn backtick_and_dollar_paren_both_decompose() {
+    let parts = decompose("`date`$(pwd)");
+    assert_eq!(parts.len(), 2);
+    assert!(matches!(
+        &parts[0].kind,
+        NodeKind::CommandSubstitution { .. }
+    ));
+    assert!(matches!(
+        &parts[1].kind,
+        NodeKind::CommandSubstitution { .. }
+    ));
+}
