@@ -230,6 +230,13 @@ fn span_to_segment(
                 segments.push(seg(text.to_string()));
             }
         }
+        WordSpanKind::Backtick => {
+            if span.end > span.start + 1
+                && let Some(c) = value.get(span.start + 1..span.end - 1)
+            {
+                segments.push(WordSegment::CommandSubstitution(c.to_string()));
+            }
+        }
         _ => {} // filtered out by span filter
     }
 }
@@ -307,6 +314,7 @@ const fn is_decomposable(kind: &crate::lexer::word_builder::WordSpanKind) -> boo
             | WordSpanKind::SimpleVar
             | WordSpanKind::BraceExpansion
             | WordSpanKind::ArithmeticSub
+            | WordSpanKind::Backtick
     )
 }
 
