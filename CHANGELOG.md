@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.14](https://github.com/mpecan/rable/compare/rable-v0.1.13...rable-v0.1.14) (2026-04-13)
+
+
+### Bug Fixes
+
+* **lexer:** skip heredoc bodies in command substitution paren tracking ([b547bf6](https://github.com/mpecan/rable/commit/b547bf6ed66b7d0638b3787a9278383790131730)), closes [#26](https://github.com/mpecan/rable/issues/26)
+* **lexer:** skip heredoc bodies in command substitution paren tracking ([#27](https://github.com/mpecan/rable/issues/27)) ([82a0721](https://github.com/mpecan/rable/commit/82a0721875f390a28309ad7f68c4dca7c21db7ac))
+
 ## [0.1.13](https://github.com/mpecan/rable/compare/rable-v0.1.12...rable-v0.1.13) (2026-04-12)
 
 
