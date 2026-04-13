@@ -3,7 +3,7 @@ use crate::token::{Token, TokenType};
 
 mod brace_expansion;
 mod expansions;
-mod heredoc;
+pub mod heredoc;
 mod operators;
 mod quotes;
 pub mod word_builder;

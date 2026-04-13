@@ -103,43 +103,6 @@ pub(super) fn make_stderr_redirect() -> Node {
     })
 }
 
-/// Parses a here-document delimiter, stripping quotes if present.
-pub(super) fn parse_heredoc_delimiter(raw: &str) -> (String, bool) {
-    let mut result = String::new();
-    let mut quoted = false;
-    let mut chars = raw.chars();
-    while let Some(c) = chars.next() {
-        match c {
-            '\'' => {
-                quoted = true;
-                for c in chars.by_ref() {
-                    if c == '\'' {
-                        break;
-                    }
-                    result.push(c);
-                }
-            }
-            '"' => {
-                quoted = true;
-                for c in chars.by_ref() {
-                    if c == '"' {
-                        break;
-                    }
-                    result.push(c);
-                }
-            }
-            '\\' => {
-                quoted = true;
-                if let Some(next) = chars.next() {
-                    result.push(next);
-                }
-            }
-            _ => result.push(c),
-        }
-    }
-    (result, quoted)
-}
-
 /// Walks an AST node and fills in empty `HereDoc` content from the lexer queue.
 #[allow(clippy::too_many_lines, clippy::match_same_arms)]
 pub(super) fn fill_heredoc_contents(node: &mut Node, lexer: &mut crate::lexer::Lexer) {
