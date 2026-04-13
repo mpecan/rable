@@ -3,12 +3,11 @@
 
 use crate::ast::{Node, NodeKind};
 use crate::error::{RableError, Result};
+use crate::lexer::heredoc::parse_heredoc_delimiter;
 use crate::token::{Token, TokenType};
 
 use super::Parser;
-use super::helpers::{
-    is_fd_number, is_varfd, parse_heredoc_delimiter, word_node, word_node_from_token,
-};
+use super::helpers::{is_fd_number, is_varfd, word_node, word_node_from_token};
 
 impl Parser {
     pub(super) fn parse_redirect(&mut self) -> Result<Node> {

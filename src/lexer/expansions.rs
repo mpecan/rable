@@ -2,6 +2,7 @@ use crate::context::CaseTracker;
 use crate::error::{RableError, Result};
 
 use super::Lexer;
+use super::heredoc::parse_heredoc_delimiter;
 use super::word_builder::{QuotingContext, WordBuilder, WordSpanKind};
 
 impl Lexer {
@@ -115,6 +116,11 @@ impl Lexer {
         let mut depth = close_count;
         let mut case = CaseTracker::default();
         let mut word_buf = String::new();
+        // Only command substitution (`$(...)`, close_count == 1) queues
+        // heredocs; arithmetic `$((...))` (close_count == 2) must keep
+        // treating `<<` as the left-shift operator.
+        let track_heredocs = close_count == 1;
+        let mut pending_heredocs: Vec<(String, bool)> = Vec::new();
 
         loop {
             match self.peek_char() {
@@ -226,6 +232,36 @@ impl Lexer {
                     word_buf.clear();
                     let c = self.advance_char().unwrap_or(' ');
                     wb.push(c);
+                    if c == '\n' && !pending_heredocs.is_empty() {
+                        let queue = std::mem::take(&mut pending_heredocs);
+                        for (delim, strip_tabs) in queue {
+                            self.read_heredoc_body_teed(&delim, strip_tabs, true, |ch| {
+                                wb.push(ch);
+                            });
+                        }
+                    }
+                }
+                Some('<') if track_heredocs => {
+                    self.advance_char();
+                    wb.push('<');
+                    if self.peek_char() == Some('<') {
+                        // `<<` is a word-terminating operator
+                        case.check_word(&word_buf);
+                        word_buf.clear();
+                        self.advance_char();
+                        wb.push('<');
+                        if self.peek_char() == Some('<') {
+                            // `<<<` herestring — not a heredoc
+                            self.advance_char();
+                            wb.push('<');
+                        } else {
+                            // `<<` or `<<-` heredoc
+                            self.queue_cmdsub_heredoc(wb, &mut pending_heredocs);
+                        }
+                    } else {
+                        // Bare `<` redirect — match catch-all word_buf behavior
+                        word_buf.push('<');
+                    }
                 }
                 Some('|') => {
                     case.check_word(&word_buf);
@@ -247,6 +283,83 @@ impl Lexer {
                 }
             }
         }
+    }
+
+    /// Parses a `<<[-]DELIM` heredoc operator that appears inside a command
+    /// substitution, pushing every consumed character verbatim into `wb` and
+    /// queuing the normalized delimiter so the body can be drained on the
+    /// next newline. The caller has already consumed `<<`.
+    fn queue_cmdsub_heredoc(&mut self, wb: &mut WordBuilder, pending: &mut Vec<(String, bool)>) {
+        let strip_tabs = self.peek_char() == Some('-');
+        if strip_tabs {
+            self.advance_char();
+            wb.push('-');
+        }
+        while matches!(self.peek_char(), Some(' ' | '\t')) {
+            if let Some(ws) = self.advance_char() {
+                wb.push(ws);
+            }
+        }
+        let raw = self.scan_heredoc_delimiter_word(wb);
+        if raw.is_empty() {
+            return;
+        }
+        // The `quoted` flag controls whether expansions happen in the body;
+        // inside a command substitution we re-emit the body verbatim, so
+        // quoting only matters for delimiter normalization (already handled
+        // by `parse_heredoc_delimiter`). The flag itself can be dropped.
+        let (delim, _quoted) = parse_heredoc_delimiter(&raw);
+        if !delim.is_empty() {
+            pending.push((delim, strip_tabs));
+        }
+    }
+
+    /// Scans a heredoc delimiter word from the input, pushing every consumed
+    /// character verbatim into `wb` and returning the raw (pre-normalization)
+    /// delimiter text so the caller can feed it to `parse_heredoc_delimiter`.
+    fn scan_heredoc_delimiter_word(&mut self, wb: &mut WordBuilder) -> String {
+        let mut raw = String::new();
+        let mut inside_single = false;
+        let mut inside_double = false;
+        loop {
+            match self.peek_char() {
+                Some('\'') if !inside_double => {
+                    self.advance_char();
+                    wb.push('\'');
+                    raw.push('\'');
+                    inside_single = !inside_single;
+                }
+                Some('"') if !inside_single => {
+                    self.advance_char();
+                    wb.push('"');
+                    raw.push('"');
+                    inside_double = !inside_double;
+                }
+                Some('\\') if !inside_single => {
+                    self.advance_char();
+                    wb.push('\\');
+                    raw.push('\\');
+                    if let Some(nc) = self.advance_char() {
+                        wb.push(nc);
+                        raw.push(nc);
+                    }
+                }
+                Some(c) if inside_single || inside_double => {
+                    self.advance_char();
+                    wb.push(c);
+                    raw.push(c);
+                }
+                Some(' ' | '\t' | '\n' | ';' | '|' | '&' | '(' | ')' | '<' | '>') | None => {
+                    break;
+                }
+                Some(c) => {
+                    self.advance_char();
+                    wb.push(c);
+                    raw.push(c);
+                }
+            }
+        }
+        raw
     }
 
     /// Reads a parameter expansion `${...}` allowing unbalanced inner `{`.

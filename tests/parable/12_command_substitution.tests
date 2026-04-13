@@ -750,3 +750,100 @@ echo $(echo $(echo ${#var}))
 ---
 (command (word "echo") (word "$(echo $(echo ${#var}))"))
 ---
+
+
+=== heredoc in cmdsub with unmatched open paren in body
+x=$(cat <<'EOF'
+foo
+(bar
+EOF
+)
+---
+(command (word "x=$(cat <<EOF\nfoo\n(bar\nEOF\n)"))
+---
+
+
+=== heredoc in cmdsub with unmatched close paren in body
+x=$(cat <<EOF
+foo
+bar)
+EOF
+)
+---
+(command (word "x=$(cat <<EOF\nfoo\nbar)\nEOF\n)"))
+---
+
+
+=== heredoc in cmdsub with tab stripping and unmatched paren
+x=$(cat <<-EOF
+	(indented unclosed
+	EOF
+)
+---
+(command (word "x=$(cat <<-EOF\n(indented unclosed\nEOF\n)"))
+---
+
+
+=== herestring in cmdsub is not heredoc
+x=$(cat <<<"(oops")
+---
+(command (word "x=$(cat <<< \"(oops\")"))
+---
+
+
+=== arithmetic left shift in cmdsub is not heredoc
+x=$(( 1 << 4 ))
+---
+(command (word "x=$(( 1 << 4 ))"))
+---
+
+
+=== two heredocs in cmdsub drain in order
+x=$(cat <<A <<B
+foo
+A
+bar
+B
+)
+---
+(command (word "x=$(cat <<A\nfoo\nA\n <<B\nbar\nB\n)"))
+---
+
+
+=== heredoc in cmdsub with double-quoted delimiter
+x=$(cat <<"EOF"
+(body
+EOF
+)
+---
+(command (word "x=$(cat <<EOF\n(body\nEOF\n)"))
+---
+
+
+=== heredoc in cmdsub with backslash-escaped delimiter
+x=$(cat <<\EOF
+(unclosed
+EOF
+)
+---
+(command (word "x=$(cat <<EOF\n(unclosed\nEOF\n)"))
+---
+
+
+=== nested cmdsub with inner heredoc and unmatched paren
+x=$(echo $(cat <<E
+(body
+E
+))
+---
+(command (word "x=$(echo $(cat <<E\n(body\nE\n))"))
+---
+
+
+=== empty heredoc body in cmdsub with unmatched outer paren
+x=$(cat <<EOF
+EOF
+)
+---
+(command (word "x=$(cat <<EOF\nEOF\n)"))
+---
