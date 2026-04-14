@@ -43,6 +43,12 @@ pub(super) fn format_node(node: &Node, out: &mut String, indent: usize) {
         NodeKind::For {
             var, words, body, ..
         } => format_for(var, words.as_deref(), body, out, indent),
+        NodeKind::Select {
+            var,
+            words,
+            body,
+            redirects,
+        } => format_select(var, words.as_deref(), body, redirects, out, indent),
         NodeKind::ForArith {
             init,
             cond,
@@ -194,7 +200,35 @@ fn format_while_until(
 }
 
 fn format_for(var: &str, words: Option<&[Node]>, body: &Node, out: &mut String, indent: usize) {
-    out.push_str("for ");
+    format_for_or_select("for", var, words, body, &[], out, indent);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn format_select(
+    var: &str,
+    words: Option<&[Node]>,
+    body: &Node,
+    redirects: &[Node],
+    out: &mut String,
+    indent: usize,
+) {
+    format_for_or_select("select", var, words, body, redirects, out, indent);
+}
+
+/// Shared layout for `for` and `select` loops. `redirects` is only
+/// non-empty for `select`, which lexes a trailing redirect list.
+#[allow(clippy::too_many_arguments)]
+fn format_for_or_select(
+    keyword: &str,
+    var: &str,
+    words: Option<&[Node]>,
+    body: &Node,
+    redirects: &[Node],
+    out: &mut String,
+    indent: usize,
+) {
+    out.push_str(keyword);
+    out.push(' ');
     out.push_str(var);
     if let Some(ws) = words {
         out.push_str(" in");
@@ -213,6 +247,10 @@ fn format_for(var: &str, words: Option<&[Node]>, body: &Node, out: &mut String, 
     out.push_str(";\n");
     indent_str(out, indent);
     out.push_str("done");
+    for r in redirects {
+        out.push(' ');
+        format_redirect(r, out);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -284,16 +322,23 @@ fn format_case(
 }
 
 fn format_function_body(body: &Node, out: &mut String, indent: usize) {
-    if let NodeKind::BraceGroup { body: inner, .. } = &body.kind {
-        out.push_str("{ \n");
+    // Bash's canonical form always wraps a function body in braces,
+    // even when the source used a parens-only body like `function f ( … )`.
+    out.push_str("{ \n");
+    let inner = if let NodeKind::BraceGroup { body: inner, .. } = &body.kind {
+        inner.as_ref()
+    } else {
+        body
+    };
+    if let NodeKind::List { items } = &inner.kind {
+        super::lists::format_list_block(items, out, indent + 4);
+    } else {
         indent_str(out, indent + 4);
         format_node(inner, out, indent + 4);
-        out.push('\n');
-        indent_str(out, indent);
-        out.push('}');
-    } else {
-        format_node(body, out, indent);
     }
+    out.push('\n');
+    indent_str(out, indent);
+    out.push('}');
 }
 
 /// Formats a conditional expression node as canonical bash source.

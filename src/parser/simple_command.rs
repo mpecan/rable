@@ -108,7 +108,7 @@ impl Parser {
                     {
                         redirects.push(self.parse_redirect_with_fd(&tok)?);
                     } else if adjacent && is_varfd(&tok.value) && self.is_redirect_operator()? {
-                        redirects.push(self.parse_redirect()?);
+                        redirects.push(self.parse_redirect_with_varfd(&tok)?);
                     } else {
                         if !saw_command_word
                             && assignments.is_empty()

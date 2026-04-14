@@ -100,6 +100,7 @@ pub(super) fn make_stderr_redirect() -> Node {
             spans: Vec::new(),
         })),
         fd: 2,
+        varfd: None,
     })
 }
 

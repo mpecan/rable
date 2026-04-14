@@ -175,10 +175,15 @@ pub enum NodeKind {
 
     // -- Redirections --
     /// I/O redirection: `[fd]op target`
+    ///
+    /// `varfd` holds the variable name when the source used the
+    /// `{name}op` form (e.g. `{fd}>file`). It is `None` for plain
+    /// numeric or default-fd redirects.
     Redirect {
         op: String,
         target: Box<Node>,
         fd: i32,
+        varfd: Option<String>,
     },
 
     /// Here-document: `<<[-]DELIM\ncontent\nDELIM`

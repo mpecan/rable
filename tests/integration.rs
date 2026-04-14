@@ -225,16 +225,10 @@ const KNOWN_ORACLE_FAILURES: &[&str] = &[
     "backtick_opaque 4",
     "backtick_opaque 5",
     "backtick_opaque 6",
-    // #39 — heredoc inside $(...)
-    "heredoc_in_cmdsub 1",
+    // #39 — heredoc inside $(...); `heredoc_in_cmdsub 1` fell out as a
+    //   side effect of #40's `<<'EOF'` quoted-delimiter fix.
     "heredoc_in_cmdsub 2",
-    // #40 — command-sub canonical reformat drift
-    "cmdsub_reformat 1",
-    "cmdsub_reformat 2",
-    "cmdsub_reformat 3",
-    "cmdsub_reformat 4",
-    "cmdsub_reformat 5",
-    "cmdsub_reformat 6",
+    // #40 — command-sub canonical reformat drift: all 6 fixed.
 ];
 
 #[derive(Default)]

@@ -150,7 +150,7 @@ impl fmt::Display for NodeKind {
             }
 
             // Redirections
-            Self::Redirect { op, target, fd } => redirects::write_redirect(f, op, target, *fd),
+            Self::Redirect { op, target, fd, .. } => redirects::write_redirect(f, op, target, *fd),
             Self::HereDoc {
                 content,
                 strip_tabs,

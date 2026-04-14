@@ -825,7 +825,7 @@ foo
 EOF
 )
 ---
-(command (word "x=$(cat <<EOF\nfoo\n(bar\nEOF\n)"))
+(command (word "x=$(cat <<'EOF'\nfoo\n(bar\nEOF\n)"))
 ---
 
 
@@ -882,7 +882,7 @@ x=$(cat <<"EOF"
 EOF
 )
 ---
-(command (word "x=$(cat <<EOF\n(body\nEOF\n)"))
+(command (word "x=$(cat <<'EOF'\n(body\nEOF\n)"))
 ---
 
 
@@ -892,7 +892,7 @@ x=$(cat <<\EOF
 EOF
 )
 ---
-(command (word "x=$(cat <<EOF\n(unclosed\nEOF\n)"))
+(command (word "x=$(cat <<'EOF'\n(unclosed\nEOF\n)"))
 ---
 
 
@@ -927,4 +927,30 @@ EOF
 ---
 (command (word "cat") (word "$(echo foo)") (redirect "<<" "body
 "))
+---
+
+
+# --- #40 follow-ups: edge paths exercised by the canonical reformatter ---
+
+=== tab-stripped quoted heredoc in cmdsub
+x=$(cat <<-'EOF'
+body
+EOF
+)
+---
+(command (word "x=$(cat <<-'EOF'\nbody\nEOF\n)"))
+---
+
+
+=== function body with && separator in cmdsub
+echo $(f() { hi && echo hi; }; f)
+---
+(command (word "echo") (word "$(function f () \n{ \n    hi && echo hi\n}; f)"))
+---
+
+
+=== varfd close-fd in cmdsub
+echo $(exec {fd}>&-)
+---
+(command (word "echo") (word "$(exec {fd}>&-)"))
 ---
