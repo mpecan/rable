@@ -27,7 +27,21 @@ impl Parser {
             TokenType::Select => self.parse_select(),
             TokenType::LeftParen => {
                 if self.lexer.pos() + 1 < self.lexer.input_len() && self.is_double_paren()? {
-                    self.parse_arith_command()
+                    // Bash resolves `((` ambiguity by trying arithmetic first
+                    // and falling back to nested subshells `( ( … ) )` when
+                    // the body is not a valid arithmetic expression (#42).
+                    // Only a `MatchedPair` error from `read_until_double_paren`
+                    // (i.e. no balanced `))`) triggers the fallback — any
+                    // other arith-side failure is a real error worth reporting.
+                    let cp = self.lexer.checkpoint();
+                    match self.parse_arith_command() {
+                        Ok(node) => Ok(node),
+                        Err(RableError::MatchedPair { .. }) => {
+                            self.lexer.restore(cp);
+                            self.parse_subshell()
+                        }
+                        Err(e) => Err(e),
+                    }
                 } else {
                     self.parse_subshell()
                 }

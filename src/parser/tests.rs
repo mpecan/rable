@@ -171,6 +171,49 @@ fn arith_command() {
 }
 
 #[test]
+fn arith_command_with_inner_parens() {
+    // Balanced inner parens still parse as arithmetic.
+    let nodes = parse("(( (1+2) ))");
+    let output = format!("{}", nodes[0]);
+    assert_eq!(output, r#"(arith (word " (1+2) "))"#);
+}
+
+#[test]
+fn double_paren_falls_back_to_nested_subshells() {
+    // Bash resolves `((x\n> 0)\n)` as two nested subshells because the
+    // body is not a valid arithmetic expression. See #42.
+    let nodes = parse("((x\n> 0)\n)\n");
+    let output = format!("{}", nodes[0]);
+    assert_eq!(
+        output,
+        r#"(subshell (subshell (semi (command (word "x")) (command (redirect ">" "0")))))"#
+    );
+}
+
+#[test]
+fn double_paren_fallback_preserves_following_command() {
+    // After a fallback-parsed `((…))`, the lexer must be positioned
+    // correctly so the next command parses normally.
+    let nodes = parse("((x\n> 0)\n)\necho done");
+    assert_eq!(nodes.len(), 2);
+    let second = format!("{}", nodes[1]);
+    assert_eq!(second, r#"(command (word "echo") (word "done"))"#);
+}
+
+#[test]
+fn double_paren_fallback_inside_if() {
+    // The fallback must work when dispatched from inside a compound
+    // construct like `if`, not just at top level.
+    let nodes = parse("if ((x\n> 0)\n); then echo hi; fi");
+    let output = format!("{}", nodes[0]);
+    assert!(
+        output.contains("(subshell (subshell"),
+        "expected nested-subshell fallback inside if, got: {output}"
+    );
+    assert!(output.contains(r#"(command (word "echo") (word "hi"))"#));
+}
+
+#[test]
 fn comment_after_command() {
     let nodes = parse("echo hi # comment");
     assert_eq!(nodes.len(), 1);
