@@ -31,7 +31,7 @@ mod word_parts;
 
 use crate::ast::{Node, NodeKind, Span};
 use crate::error::{RableError, Result};
-use crate::lexer::Lexer;
+use crate::lexer::{Lexer, LexerMode};
 use crate::token::{Token, TokenType};
 
 use helpers::{fill_heredoc_contents, word_node_from_token};
@@ -51,10 +51,23 @@ pub struct Parser {
 /// stays enforced globally across nested `$(...)`.
 pub fn parse_cmdsub_body(outer: &Lexer, outer_depth: usize) -> Result<(usize, usize)> {
     let mut parser = Parser {
-        lexer: outer.fork(),
+        lexer: outer.fork(LexerMode::Cmdsub),
         depth: outer_depth,
     };
     parser.parse_cmdsub_body_inner()?;
+    Ok((parser.lexer.pos(), parser.lexer.line()))
+}
+
+/// Runs the real command-list grammar on a backtick fork of `outer`
+/// until an unescaped `` ` `` is reached. Consumes the closing `` ` ``
+/// and returns the inner lexer's final `(pos, line)`; the parsed AST is
+/// discarded. `outer_depth` is inherited for `MAX_DEPTH`.
+pub fn parse_backtick_body(outer: &Lexer, outer_depth: usize) -> Result<(usize, usize)> {
+    let mut parser = Parser {
+        lexer: outer.fork(LexerMode::Backtick),
+        depth: outer_depth,
+    };
+    parser.parse_backtick_body_inner()?;
     Ok((parser.lexer.pos(), parser.lexer.line()))
 }
 
@@ -70,6 +83,14 @@ impl Parser {
         }
         self.expect(TokenType::RightParen)?;
         Ok(())
+    }
+
+    fn parse_backtick_body_inner(&mut self) -> Result<()> {
+        self.skip_newlines()?;
+        if !self.at_end()? {
+            let _ = self.parse_list()?;
+        }
+        self.lexer.exit_backtick_fork()
     }
 
     /// Parses the entire input, returning a list of top-level nodes.

@@ -132,6 +132,72 @@ echo `cat file | head -1`
 ---
 
 
+# Regression: the backtick body is parsed by the real parser (fork-
+# and-merge), so constructs that need grammar-aware parsing (case
+# patterns, control flow, word splitting) work structurally rather
+# than via a char-level mini-scanner.
+
+=== case statement inside backtick
+x=`case y in (a) echo hi;; esac`
+---
+(command (word "x=`case y in (a) echo hi;; esac`"))
+---
+
+
+=== if statement inside backtick
+x=`if true; then echo hi; fi`
+---
+(command (word "x=`if true; then echo hi; fi`"))
+---
+
+
+=== for loop inside backtick
+x=`for i in a b; do echo $i; done`
+---
+(command (word "x=`for i in a b; do echo $i; done`"))
+---
+
+
+# Regression: the inner fork consumes backslash-escape pairs (\\, \`,
+# \$) via Lexer::peek_backtick_escape so the forked parser sees the
+# escaped char rather than the raw backslash. Raw text is still copied
+# into wb.value verbatim so the S-expression output round-trips.
+
+=== escaped dollar inside backtick
+echo `echo \$HOME`
+---
+(command (word "echo") (word "`echo \\$HOME`"))
+---
+
+
+=== backtick with control flow inside double quotes
+echo "`if true; then echo a; fi`"
+---
+(command (word "echo") (word "\"`if true; then echo a; fi`\""))
+---
+
+
+=== double backslash inside backtick
+echo `printf %s \\`
+---
+(command (word "echo") (word "`printf %s \\\\`"))
+---
+
+
+=== nested cmdsub with case inside backtick
+x=`echo $(case y in (a) z;; esac)`
+---
+(command (word "x=`echo $(case y in (a) z;; esac)`"))
+---
+
+
+=== nested backticks via backslash escape
+x=`echo \`date\``
+---
+(command (word "x=`echo \\`date\\``"))
+---
+
+
 # === Mixed forms ===
 
 === dollar and backtick

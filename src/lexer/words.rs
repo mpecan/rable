@@ -14,6 +14,9 @@ impl Lexer {
             match c {
                 // Metacharacters end a word
                 ' ' | '\t' | '\n' | '|' | '&' | ';' | ')' => break,
+                // Closing delimiter of a backtick fork ends the word.
+                // The byte is consumed later by `exit_backtick_fork`.
+                '`' if self.at_backtick_terminator() => break,
                 // < and > are metacharacters, but <( and >( are process substitution
                 '<' | '>' => {
                     if !wb.is_empty() && self.input.get(self.pos + 1) == Some(&'(') {
