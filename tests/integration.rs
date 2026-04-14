@@ -216,9 +216,8 @@ const KNOWN_ORACLE_FAILURES: &[&str] = &[
     // #36 — unbalanced [...] absorbing || / &&: all 3 cases fixed as a
     //   side effect of #35's guarded bracket-subscript helper.
     // #37 — reserved words as plain words: cases 1, 3, 4 fixed by #44;
-    //   case 5 fixed as a side effect of #35.
-    // Case 2 is a `((` vs `( (` fallback bug — tracked as #42.
-    "reserved_word_as_word 2",
+    //   case 5 fixed as a side effect of #35; case 2 fixed by #42
+    //   (`((` → nested subshell fallback).
     // #38 — backticks opaque on invalid content
     "backtick_opaque 1",
     "backtick_opaque 2",

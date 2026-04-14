@@ -74,6 +74,21 @@ pub struct Lexer {
     parser_depth: usize,
 }
 
+/// Snapshot of the mutable state the parser needs to roll back when it
+/// speculatively tries a parse and has to retry with a different grammar
+/// rule — notably `(( … ))` vs. nested subshells (see #42). The fields
+/// captured are only those touched by `Parser::parse_arith_command` on the
+/// retry path: `pos`, `line`, `peeked`, and `last_token_end`. `ctx`,
+/// `pending_heredocs`, and `heredoc_contents` are deliberately omitted
+/// because the arithmetic parse does not observe newlines or heredocs.
+#[derive(Debug, Clone)]
+pub struct LexerCheckpoint {
+    pos: usize,
+    line: usize,
+    peeked: Option<Token>,
+    last_token_end: usize,
+}
+
 /// Which nested construct the lexer is parsing, if any.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LexerMode {
@@ -113,6 +128,22 @@ impl Lexer {
     /// Signal leaving a `[[ ]]` conditional expression context.
     pub const fn leave_cond_expr(&mut self) {
         self.ctx.cond_expr = false;
+    }
+
+    pub fn checkpoint(&self) -> LexerCheckpoint {
+        LexerCheckpoint {
+            pos: self.pos,
+            line: self.line,
+            peeked: self.peeked.clone(),
+            last_token_end: self.last_token_end,
+        }
+    }
+
+    pub fn restore(&mut self, cp: LexerCheckpoint) {
+        self.pos = cp.pos;
+        self.line = cp.line;
+        self.peeked = cp.peeked;
+        self.last_token_end = cp.last_token_end;
     }
 }
 
