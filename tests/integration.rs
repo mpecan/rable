@@ -212,23 +212,13 @@ const KNOWN_ORACLE_FAILURES: &[&str] = &[
     // bash_valid_divergences — collected from differential fuzzing against
     // bash-oracle (tests/fuzz.py mutate --valid-only). Each cluster is
     // tracked as a separate GitHub issue.
-    // #35 — ]] tokenization outside [[ ]]
-    // Case 3 was incidentally fixed by #37's reserved-words-after-
-    // assignment fix (the leading `Cdeclare -n ref=t ]] arget` needed
-    // AssignmentWord-to-Word reclassification to parse correctly).
-    "rbracket_outside_cond 1",
-    "rbracket_outside_cond 2",
-    // #36 — unbalanced [...] absorbing || / &&
-    "bracket_op_split 1",
-    "bracket_op_split 2",
-    "bracket_op_split 3",
-    // #37 — reserved words as plain words
-    // Cases 1, 3, 4 fixed in the PR that closes #37.
+    // #35 — ]] tokenization outside [[ ]]: all 3 cases fixed.
+    // #36 — unbalanced [...] absorbing || / &&: all 3 cases fixed as a
+    //   side effect of #35's guarded bracket-subscript helper.
+    // #37 — reserved words as plain words: cases 1, 3, 4 fixed by #44;
+    //   case 5 fixed as a side effect of #35.
     // Case 2 is a `((` vs `( (` fallback bug — tracked as #42.
     "reserved_word_as_word 2",
-    // Case 5 is the unbalanced `[...]` absorbing bug — same root cause
-    // as #36; being fixed as a side effect of #35.
-    "reserved_word_as_word 5",
     // #38 — backticks opaque on invalid content
     "backtick_opaque 1",
     "backtick_opaque 2",

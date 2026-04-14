@@ -215,10 +215,15 @@ impl Parser {
 
     /// Returns true if the next token would close an enclosing compound
     /// construct (`fi`, `done`, `esac`, `)`, `}`, `;;`, `;&`, `;;&`, `then`,
-    /// `else`, `elif`, `do`, `]]`, `}` as a word, or EOF).
+    /// `else`, `elif`, `do`, `}` as a word, or EOF).
+    ///
+    /// `]]` is intentionally NOT treated as a terminator here. Inside a
+    /// `[[ ]]` conditional the lexer emits `DoubleRightBracket` (handled by
+    /// the cond parser directly), and outside one a bare `]]` is just an
+    /// ordinary word (see issue #35).
     pub(super) fn is_list_terminator(&mut self) -> Result<bool> {
         let tok = self.lexer.peek_token()?;
-        if tok.kind == TokenType::Word && (tok.value == "}" || tok.value == "]]") {
+        if tok.kind == TokenType::Word && tok.value == "}" {
             return Ok(true);
         }
         Ok(matches!(
