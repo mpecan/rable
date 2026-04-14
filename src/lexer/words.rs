@@ -59,8 +59,16 @@ impl Lexer {
                 '!' | '*' if self.input.get(self.pos + 1) == Some(&'(') && self.config.extglob => {
                     self.read_extglob(&mut wb, c)?;
                 }
-                // `[` inside a word starts a subscript/bracket context
-                '[' if !wb.is_empty() && wb.value != "[" && !wb.ends_with('[') => {
+                // `[` inside a word enters the bracket-subscript context when:
+                //   * we're at command-start after a plain identifier
+                //     (covers `arr[i]=val` assignments and `foo[...]` calls
+                //     where bash absorbs whitespace / metacharacters); or
+                //   * we're inside `[[ ]]`, where bash parses regex character
+                //     classes like `[[:alpha:][:digit:]]` as a single word.
+                // In any other position a bare `[` is an ordinary character.
+                '[' if (self.ctx.command_start && is_identifier_prefix(&wb.value))
+                    || (self.ctx.cond_expr && !wb.is_empty() && !wb.ends_with('[')) =>
+                {
                     self.read_bracket_subscript(&mut wb)?;
                 }
                 // Regular character
@@ -79,10 +87,13 @@ impl Lexer {
 
         // Check for reserved words at command start, then assignment pattern.
         // Reserved-word classification requires BOTH `command_start` and
-        // `reserved_words_ok`: once a simple command has consumed an
-        // AssignmentWord, bash stops recognizing reserved words in that
-        // same command (even though we're still at command-word position).
-        let kind = if self.ctx.command_start && self.ctx.reserved_words_ok {
+        // `reserved_words_ok` (issue #37): once a simple command has
+        // consumed an AssignmentWord, bash stops recognizing reserved
+        // words in that same command even though we're still at command
+        // position. Additionally, `]]` is only a reserved word inside a
+        // `[[ ]]` conditional (issue #35); elsewhere it's an ordinary word
+        // so the parser doesn't mistake it for a terminator.
+        let mut kind = if self.ctx.command_start && self.ctx.reserved_words_ok {
             TokenType::reserved_word(&wb.value).unwrap_or_else(|| {
                 if is_assignment_word(&wb.value) {
                     TokenType::AssignmentWord
@@ -95,6 +106,9 @@ impl Lexer {
         } else {
             TokenType::Word
         };
+        if kind == TokenType::DoubleRightBracket && !self.ctx.cond_expr {
+            kind = TokenType::Word;
+        }
 
         // Update context flags for the next token.
         //
@@ -185,6 +199,12 @@ impl Lexer {
     }
 
     /// Reads a bracket subscript `[...]` inside a word.
+    ///
+    /// Called only when the word so far is a plain identifier and we are at
+    /// command-start position — i.e. an `arr[idx]=value` assignment or an
+    /// `arr[idx]` command invocation. In this position bash's parser is
+    /// permissive about whitespace and metacharacters inside `[...]`, so
+    /// we absorb them into the word verbatim until the matching `]`.
     pub(super) fn read_bracket_subscript(&mut self, wb: &mut WordBuilder) -> Result<()> {
         let start = wb.span_start();
         self.advance_char(); // consume [
@@ -289,9 +309,6 @@ impl Lexer {
                 '\'' | '"' | '\\' | '$' | '`' => {
                     self.read_word_special(wb, c)?;
                 }
-                '[' if !wb.is_empty() && wb.value != "[" && !wb.ends_with('[') => {
-                    self.read_bracket_subscript(wb)?;
-                }
                 _ => {
                     self.advance_char();
                     wb.push(c);
@@ -362,9 +379,6 @@ impl Lexer {
                 '\'' | '"' | '\\' | '$' | '`' => {
                     self.read_word_special(wb, c)?;
                 }
-                '[' if !wb.is_empty() && wb.value != "[" && !wb.ends_with('[') => {
-                    self.read_bracket_subscript(wb)?;
-                }
                 _ => {
                     self.advance_char();
                     wb.push(c);
@@ -373,6 +387,26 @@ impl Lexer {
         }
         Ok(())
     }
+}
+
+/// Returns true if `value` is a non-empty plain bash identifier
+/// (`[a-zA-Z_][a-zA-Z_0-9]*`) with no other characters.
+///
+/// Used to gate bracket-subscript absorption: `arr[i]=x` and `arr[i]`
+/// only behave specially when the word so far is a bare identifier.
+/// Words like `][[`, `[c[`, or `foo^` must fall through to ordinary
+/// tokenization so `[...]` contents do not absorb whitespace.
+fn is_identifier_prefix(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let Some(first) = bytes.first() else {
+        return false;
+    };
+    if !matches!(first, b'a'..=b'z' | b'A'..=b'Z' | b'_') {
+        return false;
+    }
+    bytes[1..]
+        .iter()
+        .all(|b| matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_'))
 }
 
 /// Returns true if a word value matches the assignment pattern `NAME=`,
