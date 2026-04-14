@@ -149,7 +149,7 @@ impl Parser {
                 | TokenType::DoubleLessDash
                 | TokenType::TripleLess
         ) {
-            let mut redirects = vec![self.build_redirect(first_tok, -1)?];
+            let mut redirects = vec![self.build_redirect(first_tok, -1, None)?];
             redirects.extend(self.parse_trailing_redirects()?);
             return Ok(self.spanned(
                 start,

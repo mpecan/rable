@@ -7,16 +7,30 @@ use super::nodes::{format_command_words, format_node};
 use super::words::process_word_value;
 
 pub(super) fn format_redirect(node: &Node, out: &mut String) {
-    if let NodeKind::Redirect { op, target, fd } = &node.kind {
+    if let NodeKind::Redirect {
+        op,
+        target,
+        fd,
+        varfd,
+    } = &node.kind
+    {
         // Close-fd redirects: >&- with target fd → output as "fd>&-"
         if op == ">&-" {
-            if let NodeKind::Word { value, .. } = &target.kind {
+            if let Some(name) = varfd {
+                out.push('{');
+                out.push_str(name);
+                out.push('}');
+            } else if let NodeKind::Word { value, .. } = &target.kind {
                 out.push_str(value);
             }
             out.push_str(">&-");
             return;
         }
-        if *fd >= 0 && *fd != default_fd_for_op(op) {
+        if let Some(name) = varfd {
+            out.push('{');
+            out.push_str(name);
+            out.push('}');
+        } else if *fd >= 0 && *fd != default_fd_for_op(op) {
             out.push_str(&fd.to_string());
         }
         out.push_str(op);
@@ -32,16 +46,29 @@ pub(super) fn format_redirect(node: &Node, out: &mut String) {
         delimiter,
         content,
         strip_tabs,
+        quoted,
         ..
     } = &node.kind
     {
         let op = if *strip_tabs { "<<-" } else { "<<" };
         out.push_str(op);
-        out.push_str(delimiter);
+        write_heredoc_delimiter(out, delimiter, *quoted);
         out.push('\n');
         out.push_str(content);
         out.push_str(delimiter);
         out.push('\n');
+    }
+}
+
+/// Emits a heredoc opening delimiter, wrapping it in single quotes when
+/// the source used any quoting form (`<<'EOF'`, `<<"EOF"`, `<<\EOF`).
+fn write_heredoc_delimiter(out: &mut String, delimiter: &str, quoted: bool) {
+    if quoted {
+        out.push('\'');
+        out.push_str(delimiter);
+        out.push('\'');
+    } else {
+        out.push_str(delimiter);
     }
 }
 
@@ -89,12 +116,13 @@ fn format_command_with_heredoc_pipe(node: &Node, out: &mut String) {
                 delimiter,
                 content,
                 strip_tabs,
+                quoted,
                 ..
             } = &r.kind
             {
                 let op = if *strip_tabs { " <<-" } else { " <<" };
                 out.push_str(op);
-                out.push_str(delimiter);
+                write_heredoc_delimiter(out, delimiter, *quoted);
                 out.push_str(" |\n"); // pipe on delimiter line
                 out.push_str(content);
                 out.push_str(delimiter);

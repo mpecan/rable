@@ -503,3 +503,35 @@ fn list_trailing_background() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].operator, Some(ListOperator::Background));
 }
+
+#[test]
+fn varfd_redirect_populates_ast_field() {
+    // Pins the `Redirect.varfd` AST field (added for #40). The sexp
+    // layer intentionally drops the varfd name to stay compatible with
+    // Parable's corpus, so only an AST-level assertion catches a
+    // regression where the parser forgets to populate the field.
+    let nodes = parse("exec {fd}>file.txt");
+    assert_eq!(nodes.len(), 1);
+    let NodeKind::Command { redirects, .. } = &nodes[0].kind else {
+        unreachable!("expected Command");
+    };
+    assert_eq!(redirects.len(), 1);
+    let NodeKind::Redirect { op, varfd, .. } = &redirects[0].kind else {
+        unreachable!("expected Redirect");
+    };
+    assert_eq!(op, ">");
+    assert_eq!(varfd.as_deref(), Some("fd"));
+}
+
+#[test]
+fn plain_fd_redirect_has_no_varfd() {
+    let nodes = parse("exec 3>file.txt");
+    let NodeKind::Command { redirects, .. } = &nodes[0].kind else {
+        unreachable!("expected Command");
+    };
+    let NodeKind::Redirect { fd, varfd, .. } = &redirects[0].kind else {
+        unreachable!("expected Redirect");
+    };
+    assert_eq!(*fd, 3);
+    assert!(varfd.is_none());
+}

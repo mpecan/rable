@@ -5,7 +5,12 @@ use crate::ast::{ListItem, ListOperator};
 
 use super::nodes::format_node;
 use super::redirects::has_heredoc_redirect_deep;
+use super::words::indent_str;
 
+/// Inline list formatter — joins items with `; `, ` && `, ` || `, ` & `
+/// on a single line. Used by the default `format_node` dispatch for
+/// `NodeKind::List` at every context except a function body's brace
+/// group (where [`format_list_block`] produces the multi-line form).
 pub(super) fn format_list(items: &[ListItem], out: &mut String, indent: usize) {
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
@@ -60,5 +65,39 @@ fn format_list_op(op: ListOperator, out: &mut String) {
         ListOperator::Or => out.push_str(" || "),
         ListOperator::Semi => out.push_str("; "),
         ListOperator::Background => out.push_str(" & "),
+    }
+}
+
+/// Block-style list formatter for function body brace groups.
+///
+/// Bash's canonical form only breaks lines on *statement terminators*
+/// — `;` and `&`. The short-circuit separators `&&` / `||` stay inline
+/// because they form a single logical command with their operands.
+/// So `hi; echo hi` becomes two lines, but `hi && echo hi` stays on
+/// one line (indented once).
+///
+/// Distinct from [`format_list`] above, which is the inline variant
+/// used at every non-function-body context.
+pub(super) fn format_list_block(items: &[ListItem], out: &mut String, indent: usize) {
+    for (i, item) in items.iter().enumerate() {
+        if i == 0 {
+            indent_str(out, indent);
+        }
+        format_node(&item.command, out, indent);
+        if i + 1 >= items.len() {
+            continue;
+        }
+        match item.operator {
+            Some(ListOperator::And) => out.push_str(" && "),
+            Some(ListOperator::Or) => out.push_str(" || "),
+            Some(ListOperator::Background) => {
+                out.push_str(" &\n");
+                indent_str(out, indent);
+            }
+            Some(ListOperator::Semi) | None => {
+                out.push_str(";\n");
+                indent_str(out, indent);
+            }
+        }
     }
 }
