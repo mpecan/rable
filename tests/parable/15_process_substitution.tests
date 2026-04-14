@@ -239,3 +239,46 @@ f() {
 ---
 (function "f" (brace-group (command (word "cat") (redirect "<" "<(echo)"))))
 ---
+
+
+=== heredoc with close paren in body inside process sub
+cat <(cat <<EOF
+) inside body
+EOF
+)
+---
+(command (word "cat") (word "<(cat <<EOF\n) inside body\nEOF\n)"))
+---
+
+
+=== heredoc delimiter with closing paren on same line inside process sub
+cat <(cat <<EOF
+body
+EOF)
+---
+(command (word "cat") (word "<(cat <<EOF\nbody\nEOF\n)"))
+---
+
+
+=== case with leading paren inside process sub
+cat <(case $x in (a) echo ok;; esac)
+---
+(command (word "cat") (word "<(case $x in a)\n        echo ok\n    ;;\nesac)"))
+---
+
+
+=== binary nested process substitutions
+diff <(cat <(echo a)) <(echo b)
+---
+(command (word "diff") (word "<(cat <(echo a))") (word "<(echo b)"))
+---
+
+
+=== output process sub with heredoc and close paren
+tee >(cat <<EOF
+) also in body
+EOF
+)
+---
+(command (word "tee") (word ">(cat <<EOF\n) also in body\nEOF\n)"))
+---
