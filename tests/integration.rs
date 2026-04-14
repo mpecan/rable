@@ -243,8 +243,6 @@ const KNOWN_ORACLE_FAILURES: &[&str] = &[
     "cmdsub_reformat 4",
     "cmdsub_reformat 5",
     "cmdsub_reformat 6",
-    // #41 — backslash-newline in $(( ))
-    "linecont_in_arith 1",
 ];
 
 #[derive(Default)]

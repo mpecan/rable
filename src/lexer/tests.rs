@@ -303,3 +303,25 @@ fn span_deprecated_arith() {
     assert_eq!(spans[0].start, 0);
     assert_eq!(spans[0].end, val.len());
 }
+
+#[test]
+#[allow(clippy::expect_used)]
+fn arith_command_strips_line_continuation() {
+    // `((` is already consumed before read_until_double_paren runs,
+    // so the input here is the arithmetic body plus the closing `))`.
+    let mut lexer = Lexer::new("1 + \\\n2))", false);
+    let raw = lexer
+        .read_until_double_paren()
+        .expect("read_until_double_paren should succeed");
+    assert_eq!(raw, "1 + 2");
+}
+
+#[test]
+#[allow(clippy::expect_used)]
+fn arith_command_preserves_other_backslash_escapes() {
+    let mut lexer = Lexer::new("a\\b))", false);
+    let raw = lexer
+        .read_until_double_paren()
+        .expect("read_until_double_paren should succeed");
+    assert_eq!(raw, "a\\b");
+}
