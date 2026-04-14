@@ -352,7 +352,11 @@ impl Lexer {
         }
     }
 
-    /// Reads raw text until `))` for C-style for loops.
+    /// Reads raw text until `))` for arithmetic commands `(( ... ))` and
+    /// C-style `for (( ; ; ))` loops.
+    ///
+    /// Backslash-newline is stripped as a line continuation (matching bash),
+    /// other `\<x>` escapes are preserved byte-for-byte.
     ///
     /// # Errors
     ///
@@ -381,6 +385,21 @@ impl Lexer {
                     self.advance_char();
                     depth -= 1;
                     result.push(')');
+                }
+                Some('\\') => {
+                    // `\<newline>` is a line continuation in arithmetic
+                    // context — drop both characters. All other `\<x>`
+                    // sequences are preserved byte-for-byte so the
+                    // arithmetic parser sees the same raw text as bash.
+                    self.advance_char();
+                    if self.peek_char() == Some('\n') {
+                        self.advance_char();
+                    } else {
+                        result.push('\\');
+                        if let Some(c) = self.advance_char() {
+                            result.push(c);
+                        }
+                    }
                 }
                 Some(c) => {
                     self.advance_char();
