@@ -11,15 +11,18 @@ impl Lexer {
             Some('|') => {
                 self.advance_char();
                 self.ctx.command_start = true;
+                self.ctx.reserved_words_ok = true;
                 Ok(Token::new(TokenType::Or, "||", start, line))
             }
             Some('&') => {
                 self.advance_char();
                 self.ctx.command_start = true;
+                self.ctx.reserved_words_ok = true;
                 Ok(Token::new(TokenType::PipeBoth, "|&", start, line))
             }
             _ => {
                 self.ctx.command_start = true;
+                self.ctx.reserved_words_ok = true;
                 Ok(Token::new(TokenType::Pipe, "|", start, line))
             }
         }
@@ -32,6 +35,7 @@ impl Lexer {
             Some('&') => {
                 self.advance_char();
                 self.ctx.command_start = true;
+                self.ctx.reserved_words_ok = true;
                 Ok(Token::new(TokenType::And, "&&", start, line))
             }
             Some('>') => {
@@ -45,6 +49,7 @@ impl Lexer {
             }
             _ => {
                 self.ctx.command_start = true;
+                self.ctx.reserved_words_ok = true;
                 Ok(Token::new(TokenType::Ampersand, "&", start, line))
             }
         }
@@ -57,6 +62,7 @@ impl Lexer {
             Some(';') => {
                 self.advance_char();
                 self.ctx.command_start = true;
+                self.ctx.reserved_words_ok = true;
                 if self.peek_char() == Some('&') {
                     self.advance_char();
                     Ok(Token::new(TokenType::SemiSemiAnd, ";;&", start, line))
@@ -67,10 +73,12 @@ impl Lexer {
             Some('&') => {
                 self.advance_char();
                 self.ctx.command_start = true;
+                self.ctx.reserved_words_ok = true;
                 Ok(Token::new(TokenType::SemiAnd, ";&", start, line))
             }
             _ => {
                 self.ctx.command_start = true;
+                self.ctx.reserved_words_ok = true;
                 Ok(Token::new(TokenType::Semi, ";", start, line))
             }
         }

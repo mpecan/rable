@@ -145,6 +145,41 @@ fn assignment_before_command_keeps_command_start() {
     assert_eq!(tokens[2].0, TokenType::Word);
 }
 
+#[test]
+fn reserved_word_after_assignment_is_plain_word() {
+    // Issue #37: after an AssignmentWord is consumed in a simple command,
+    // subsequent words must not be classified as reserved words.
+    // `bash -n -c 'foo=bar for'` is valid — `for` is a plain word there.
+    let tokens = collect_tokens("foo= for x");
+    assert_eq!(tokens[0].0, TokenType::AssignmentWord);
+    assert_eq!(tokens[1], (TokenType::Word, "for".to_string()));
+    assert_eq!(tokens[2], (TokenType::Word, "x".to_string()));
+
+    let tokens = collect_tokens("arr[0]=$fo do o");
+    assert_eq!(tokens[0].0, TokenType::AssignmentWord);
+    assert_eq!(tokens[1], (TokenType::Word, "do".to_string()));
+
+    let tokens = collect_tokens("x=$ then bar");
+    assert_eq!(tokens[0].0, TokenType::AssignmentWord);
+    assert_eq!(tokens[1], (TokenType::Word, "then".to_string()));
+}
+
+#[test]
+fn reserved_word_re_armed_after_separator() {
+    // After a command separator (`;`, `|`, newline, etc.), reserved-word
+    // recognition must re-arm even if the previous simple command had
+    // consumed an AssignmentWord.
+    let tokens = collect_tokens("foo=bar baz; do");
+    assert_eq!(tokens[0].0, TokenType::AssignmentWord);
+    // tokens: AssignmentWord, Word(baz), Semi, Do
+    assert_eq!(tokens[3].0, TokenType::Do);
+
+    let tokens = collect_tokens("foo= for | do");
+    // tokens: AssignmentWord, Word(for), Pipe, Do
+    assert_eq!(tokens[1], (TokenType::Word, "for".to_string()));
+    assert_eq!(tokens[3].0, TokenType::Do);
+}
+
 // -- Span recording tests --
 
 use super::word_builder::{WordSpan, WordSpanKind};
