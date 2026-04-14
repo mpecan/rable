@@ -59,10 +59,6 @@ impl WordBuilder {
         self.value.is_empty()
     }
 
-    pub const fn len(&self) -> usize {
-        self.value.len()
-    }
-
     /// Returns the current byte offset — use before an expansion to
     /// capture its start position.
     pub const fn span_start(&self) -> usize {

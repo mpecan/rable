@@ -59,21 +59,18 @@ impl Lexer {
         Ok(())
     }
 
-    /// Reads `$(...)` command substitution content and validates it.
+    /// Reads `$(...)` by forking a fresh parser over the shared source
+    /// buffer. The fork consumes up to and including the matching `)`;
+    /// the consumed range is then copied into `wb.value`. Precondition:
+    /// `read_dollar` has already pushed `$(`.
     fn read_command_sub(&mut self, wb: &mut WordBuilder) -> Result<()> {
-        let content_start = wb.len();
-        self.read_matched_parens(wb, 1)?;
-        let content_end = wb.len().saturating_sub(1);
-        if content_start < content_end {
-            let content = &wb.value[content_start..content_end];
-            if !content.trim().is_empty() && crate::parse(content, self.extglob()).is_err() {
-                return Err(RableError::parse(
-                    "invalid command substitution",
-                    self.pos,
-                    self.line,
-                ));
-            }
-        }
+        let body_start = self.pos;
+        let outer_depth = self.parser_depth();
+        let (end_pos, end_line) = crate::parser::parse_cmdsub_body(self, outer_depth)?;
+        wb.value
+            .extend(self.input[body_start..end_pos].iter().copied());
+        self.pos = end_pos;
+        self.line = end_line;
         Ok(())
     }
 
