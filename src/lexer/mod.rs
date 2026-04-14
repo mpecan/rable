@@ -27,8 +27,15 @@ struct LexerConfig {
 /// Private — the parser interacts via methods on `Lexer`.
 #[derive(Debug, Clone)]
 pub struct LexerContext {
-    /// At command start position — reserved words are recognized.
+    /// At command start position — eligible to begin a new simple command
+    /// or to accept an `AssignmentWord`.
     pub command_start: bool,
+    /// Reserved-word recognition is enabled. Distinct from `command_start`:
+    /// after a simple command has consumed one or more `AssignmentWord`s,
+    /// subsequent words must NOT be classified as reserved words, even
+    /// though we are still at command-word position. Re-armed whenever
+    /// `command_start` is re-armed (separators, newlines, etc.).
+    pub reserved_words_ok: bool,
     /// Inside a `[[ ]]` conditional expression.
     pub cond_expr: bool,
 }
@@ -37,6 +44,7 @@ impl Default for LexerContext {
     fn default() -> Self {
         Self {
             command_start: true,
+            reserved_words_ok: true,
             cond_expr: false,
         }
     }
@@ -89,9 +97,12 @@ pub enum LexerMode {
 impl Lexer {
     // -- State API for parser --
 
-    /// Signal that the next word position is a command start.
+    /// Signal that the next word position is a command start. Also
+    /// re-arms reserved-word recognition — a fresh command is always
+    /// allowed to begin with a reserved word.
     pub const fn set_command_start(&mut self) {
         self.ctx.command_start = true;
+        self.ctx.reserved_words_ok = true;
     }
 
     /// Signal entering a `[[ ]]` conditional expression context.
@@ -315,6 +326,7 @@ impl Lexer {
             '\n' => {
                 self.advance_char();
                 self.ctx.command_start = true;
+                self.ctx.reserved_words_ok = true;
                 // Read any pending here-documents after the newline
                 if !self.pending_heredocs.is_empty() {
                     self.read_pending_heredocs();

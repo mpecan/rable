@@ -77,8 +77,12 @@ impl Lexer {
             return Err(RableError::parse("unexpected character", start, line));
         }
 
-        // Check for reserved words at command start, then assignment pattern
-        let kind = if self.ctx.command_start {
+        // Check for reserved words at command start, then assignment pattern.
+        // Reserved-word classification requires BOTH `command_start` and
+        // `reserved_words_ok`: once a simple command has consumed an
+        // AssignmentWord, bash stops recognizing reserved words in that
+        // same command (even though we're still at command-word position).
+        let kind = if self.ctx.command_start && self.ctx.reserved_words_ok {
             TokenType::reserved_word(&wb.value).unwrap_or_else(|| {
                 if is_assignment_word(&wb.value) {
                     TokenType::AssignmentWord
@@ -92,18 +96,30 @@ impl Lexer {
             TokenType::Word
         };
 
-        // After a word, we're no longer at command start (unless it's a keyword
-        // that expects another command, or it's an assignment)
-        self.ctx.command_start = kind.starts_command()
-            || kind == TokenType::AssignmentWord
-            || matches!(
-                kind,
-                TokenType::Then
-                    | TokenType::Else
-                    | TokenType::Elif
-                    | TokenType::Do
-                    | TokenType::Semi
-            );
+        // Update context flags for the next token.
+        //
+        // AssignmentWord keeps `command_start=true` (assignments chain and
+        // the eventual command word is still at command position) but clears
+        // `reserved_words_ok` — no more reserved words in this simple command.
+        //
+        // Other words follow the existing rule: command_start re-arms only
+        // for keywords that start a new command (`then`, `else`, ...), and
+        // `reserved_words_ok` tracks `command_start` directly.
+        if kind == TokenType::AssignmentWord {
+            self.ctx.command_start = true;
+            self.ctx.reserved_words_ok = false;
+        } else {
+            self.ctx.command_start = kind.starts_command()
+                || matches!(
+                    kind,
+                    TokenType::Then
+                        | TokenType::Else
+                        | TokenType::Elif
+                        | TokenType::Do
+                        | TokenType::Semi
+                );
+            self.ctx.reserved_words_ok = self.ctx.command_start;
+        }
 
         Ok(Token::with_spans(kind, wb.value, start, line, wb.spans))
     }
@@ -248,6 +264,7 @@ impl Lexer {
         // Continue reading word chars after the process substitution
         self.continue_word(&mut wb)?;
         self.ctx.command_start = false;
+        self.ctx.reserved_words_ok = false;
         Ok(Token::with_spans(
             TokenType::Word,
             wb.value,
