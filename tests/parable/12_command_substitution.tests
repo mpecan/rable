@@ -847,3 +847,18 @@ EOF
 ---
 (command (word "x=$(cat <<EOF\nEOF\n)"))
 ---
+
+
+# Regression: the inner fork's heredoc state must not leak into the outer
+# parser's pending-heredoc queue. The outer `<<EOF` is queued AFTER the
+# cmdsub is fully consumed, and its body must be read from the lines that
+# follow the outer command line.
+
+=== outer heredoc follows cmdsub argument
+cat $(echo foo) <<EOF
+body
+EOF
+---
+(command (word "cat") (word "$(echo foo)") (redirect "<<" "body
+"))
+---

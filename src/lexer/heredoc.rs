@@ -76,9 +76,11 @@ impl Lexer {
         }
     }
 
-    /// Reads a here-document body until the delimiter line.
+    /// Reads a here-document body until the delimiter line. On a cmdsub
+    /// fork (`in_cmdsub`), a trailing `)` on the delimiter line is
+    /// accepted and rewound for the outer fork to consume.
     pub(super) fn read_heredoc_body(&mut self, delimiter: &str, strip_tabs: bool) -> String {
-        self.read_heredoc_body_teed(delimiter, strip_tabs, false, |_| {})
+        self.read_heredoc_body_teed(delimiter, strip_tabs, self.in_cmdsub, |_| {})
     }
 
     /// Reads a here-document body like `read_heredoc_body`, but also streams

@@ -45,9 +45,31 @@ pub struct Parser {
     pub(super) depth: usize,
 }
 
+/// Runs the real command-list grammar on a fork of `outer` until the
+/// matching `)` is consumed. Returns the inner lexer's final `(pos, line)`;
+/// the parsed AST is discarded. `outer_depth` is inherited so `MAX_DEPTH`
+/// stays enforced globally across nested `$(...)`.
+pub fn parse_cmdsub_body(outer: &Lexer, outer_depth: usize) -> Result<(usize, usize)> {
+    let mut parser = Parser {
+        lexer: outer.fork(),
+        depth: outer_depth,
+    };
+    parser.parse_cmdsub_body_inner()?;
+    Ok((parser.lexer.pos(), parser.lexer.line()))
+}
+
 impl Parser {
     pub const fn new(lexer: Lexer) -> Self {
         Self { lexer, depth: 0 }
+    }
+
+    fn parse_cmdsub_body_inner(&mut self) -> Result<()> {
+        self.skip_newlines()?;
+        if !self.peek_is(TokenType::RightParen)? {
+            let _ = self.parse_list()?;
+        }
+        self.expect(TokenType::RightParen)?;
+        Ok(())
     }
 
     /// Parses the entire input, returning a list of top-level nodes.
@@ -107,6 +129,7 @@ impl Parser {
     /// Increments depth and returns an error if too deep.
     pub(super) fn enter(&mut self) -> Result<()> {
         self.depth += 1;
+        self.lexer.set_parser_depth(self.depth);
         if self.depth > MAX_DEPTH {
             return Err(RableError::parse(
                 "maximum parsing depth exceeded",
@@ -119,6 +142,7 @@ impl Parser {
 
     pub(super) const fn leave(&mut self) {
         self.depth = self.depth.saturating_sub(1);
+        self.lexer.set_parser_depth(self.depth);
     }
 
     // -- token validation --------------------------------------------------

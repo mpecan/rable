@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::error::{RableError, Result};
 use crate::token::{Token, TokenType};
 
@@ -16,9 +18,9 @@ pub use heredoc::PendingHereDoc;
 
 /// Immutable lexer configuration set at construction time.
 #[derive(Debug, Clone, Copy)]
-pub struct LexerConfig {
+struct LexerConfig {
     /// Whether extended glob patterns `@()`, `?()`, `*()`, `+()`, `!()` are enabled.
-    pub extglob: bool,
+    extglob: bool,
 }
 
 /// Mutable context flags the parser uses to inform the lexer.
@@ -42,7 +44,7 @@ impl Default for LexerContext {
 
 /// Hand-written context-sensitive lexer for bash.
 pub struct Lexer {
-    input: Vec<char>,
+    input: Rc<[char]>,
     pos: usize,
     line: usize,
     peeked: Option<Token>,
@@ -54,6 +56,14 @@ pub struct Lexer {
     pub heredoc_contents: Vec<String>,
     /// End position (char index) of the most recently consumed token.
     last_token_end: usize,
+    /// True on a cmdsub fork: makes `read_heredoc_body` accept `DELIM)`
+    /// on the delimiter line and rewind the trailing `)` into the input.
+    in_cmdsub: bool,
+    /// Mirror of the owning `Parser::depth`, synced by `Parser::enter`
+    /// and `Parser::leave`. Read by `read_command_sub` so forked inner
+    /// parsers start at the outer depth — without this, nested `$(...)`
+    /// could blow the native stack before hitting `MAX_DEPTH`.
+    parser_depth: usize,
 }
 
 impl Lexer {
@@ -73,17 +83,12 @@ impl Lexer {
     pub const fn leave_cond_expr(&mut self) {
         self.ctx.cond_expr = false;
     }
-
-    /// Whether extended glob patterns are enabled.
-    pub const fn extglob(&self) -> bool {
-        self.config.extglob
-    }
 }
 
 impl Lexer {
     pub fn new(source: &str, extglob: bool) -> Self {
         Self {
-            input: source.chars().collect(),
+            input: source.chars().collect::<Vec<_>>().into(),
             pos: 0,
             line: 1,
             peeked: None,
@@ -92,7 +97,36 @@ impl Lexer {
             pending_heredocs: Vec::new(),
             heredoc_contents: Vec::new(),
             last_token_end: 0,
+            in_cmdsub: false,
+            parser_depth: 0,
         }
+    }
+
+    /// Forks a new lexer seeded at the current position, sharing the
+    /// source buffer. Fresh token/heredoc state; runs in cmdsub mode so
+    /// `DELIM)` on a heredoc delimiter line is accepted.
+    pub(crate) fn fork(&self) -> Self {
+        Self {
+            input: Rc::clone(&self.input),
+            pos: self.pos,
+            line: self.line,
+            peeked: None,
+            config: self.config,
+            ctx: LexerContext::default(),
+            pending_heredocs: Vec::new(),
+            heredoc_contents: Vec::new(),
+            last_token_end: self.pos,
+            in_cmdsub: true,
+            parser_depth: self.parser_depth,
+        }
+    }
+
+    pub(crate) const fn parser_depth(&self) -> usize {
+        self.parser_depth
+    }
+
+    pub(crate) const fn set_parser_depth(&mut self, depth: usize) {
+        self.parser_depth = depth;
     }
 
     /// Returns the current position.
@@ -111,7 +145,7 @@ impl Lexer {
     }
 
     /// Returns the total input length.
-    pub const fn input_len(&self) -> usize {
+    pub fn input_len(&self) -> usize {
         self.input.len()
     }
 
@@ -125,7 +159,7 @@ impl Lexer {
     }
 
     /// Returns true if at end of input.
-    pub const fn at_end(&self) -> bool {
+    pub fn at_end(&self) -> bool {
         self.pos >= self.input.len()
     }
 
