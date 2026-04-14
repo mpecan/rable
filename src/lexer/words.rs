@@ -226,7 +226,7 @@ impl Lexer {
         wb.push(dir);
         self.advance_char(); // (
         wb.push('(');
-        self.read_matched_parens(wb, 1)?;
+        self.read_paren_body_forked(wb)?;
         wb.record(start, WordSpanKind::ProcessSub(dir));
         Ok(())
     }
@@ -242,8 +242,8 @@ impl Lexer {
         // Read (
         self.advance_char();
         wb.push('(');
-        // Read until matching )
-        self.read_matched_parens(&mut wb, 1)?;
+        // Read until matching ) via fork-and-merge
+        self.read_paren_body_forked(&mut wb)?;
         wb.record(span_start, WordSpanKind::ProcessSub(dir));
         // Continue reading word chars after the process substitution
         self.continue_word(&mut wb)?;

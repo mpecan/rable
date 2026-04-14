@@ -48,13 +48,18 @@ pub struct Parser {
 /// Runs the real command-list grammar on a fork of `outer` until the
 /// matching `)` is consumed. Returns the inner lexer's final `(pos, line)`;
 /// the parsed AST is discarded. `outer_depth` is inherited so `MAX_DEPTH`
-/// stays enforced globally across nested `$(...)`.
-pub fn parse_cmdsub_body(outer: &Lexer, outer_depth: usize) -> Result<(usize, usize)> {
+/// stays enforced globally across nested parenthesized bodies.
+///
+/// Used by both `$(...)` command substitution and `<(...)`/`>(...)` process
+/// substitution — their bodies are structurally identical (a command list
+/// terminated by `)`), and `LexerMode::Cmdsub` already provides the
+/// `DELIM)`-rewind heredoc behavior both need.
+pub fn parse_paren_body(outer: &Lexer, outer_depth: usize) -> Result<(usize, usize)> {
     let mut parser = Parser {
         lexer: outer.fork(LexerMode::Cmdsub),
         depth: outer_depth,
     };
-    parser.parse_cmdsub_body_inner()?;
+    parser.parse_paren_body_inner()?;
     Ok((parser.lexer.pos(), parser.lexer.line()))
 }
 
@@ -76,7 +81,7 @@ impl Parser {
         Self { lexer, depth: 0 }
     }
 
-    fn parse_cmdsub_body_inner(&mut self) -> Result<()> {
+    fn parse_paren_body_inner(&mut self) -> Result<()> {
         self.skip_newlines()?;
         if !self.peek_is(TokenType::RightParen)? {
             let _ = self.parse_list()?;

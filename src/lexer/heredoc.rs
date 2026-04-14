@@ -49,12 +49,16 @@ pub struct PendingHereDoc {
     pub quoted: bool,
 }
 
-/// One heredoc body line, captured both verbatim (for teeing) and in
-/// normalized form (for delimiter matching).
+/// One heredoc body line in normalized form (delimiter-match-ready) plus
+/// termination metadata used by the cmdsub-mode rewind path.
 struct ReadLine {
-    raw: String,
     line: String,
     eof_after_backslash: bool,
+    /// True if the line ended at EOF with no trailing `\n` — i.e. the
+    /// heredoc body ran out of input. The cmdsub-mode rewind only fires
+    /// on such lines, because `DELIM)` only butts up against the outer
+    /// construct's closing paren when there's no newline between them.
+    terminated_at_eof: bool,
 }
 
 impl Lexer {
@@ -77,38 +81,21 @@ impl Lexer {
     }
 
     /// Reads a here-document body until the delimiter line. In a cmdsub
-    /// fork, a trailing `)` on the delimiter line is accepted and
-    /// rewound for the outer fork to consume.
+    /// fork (which process substitution also uses), an EOF line of the
+    /// form `DELIM)` (or `DELIM)))`) is also accepted as the delimiter:
+    /// the trailing `)` chars are rewound back into the input so the
+    /// outer scanner / fork grammar can consume them.
     pub(super) fn read_heredoc_body(&mut self, delimiter: &str, strip_tabs: bool) -> String {
         let cmdsub_mode = self.mode == super::LexerMode::Cmdsub;
-        self.read_heredoc_body_teed(delimiter, strip_tabs, cmdsub_mode, |_| {})
-    }
-
-    /// Reads a here-document body like `read_heredoc_body`, but also streams
-    /// every consumed character to `tee` so callers needing the raw, verbatim
-    /// input (e.g. the command-substitution scanner) can capture it without
-    /// duplicating the line/delimiter/backslash logic.
-    ///
-    /// When `cmdsub_mode` is true, an EOF line of the form `DELIM)` (or
-    /// `DELIM)))`) is also accepted as the delimiter: the trailing `)` chars
-    /// are rewound back into the input so the outer command-substitution
-    /// scanner can consume them as the closing paren.
-    pub(super) fn read_heredoc_body_teed<F: FnMut(char)>(
-        &mut self,
-        delimiter: &str,
-        strip_tabs: bool,
-        cmdsub_mode: bool,
-        mut tee: F,
-    ) -> String {
         let mut content = String::new();
         loop {
             if self.at_end() {
                 break;
             }
             let ReadLine {
-                mut raw,
                 line,
                 eof_after_backslash,
+                terminated_at_eof,
             } = self.read_heredoc_line();
             // Check if this line matches the delimiter
             let check_line = if strip_tabs {
@@ -119,12 +106,8 @@ impl Lexer {
             // Match delimiter exactly, or with trailing whitespace
             // (bash allows trailing spaces on the delimiter line)
             let mut matched = check_line == delimiter || check_line.trim_end() == delimiter;
-            if !matched && cmdsub_mode {
-                matched = self.try_rewind_cmdsub_close(&mut raw, &line, delimiter, strip_tabs);
-            }
-            // Tee the raw consumed chars (after any rewind)
-            for c in raw.chars() {
-                tee(c);
+            if !matched && cmdsub_mode && terminated_at_eof {
+                matched = self.try_rewind_cmdsub_close(&line, delimiter, strip_tabs);
             }
             if matched {
                 break;
@@ -142,27 +125,23 @@ impl Lexer {
         content
     }
 
-    /// Reads one logical line of heredoc input, returning the raw verbatim
-    /// form (for teeing) and the normalized form (for delimiter matching).
+    /// Reads one logical line of heredoc input in normalized form
+    /// (line-continuations collapsed, trailing `\n` excluded, backslash-EOF
+    /// doubled) plus termination flags.
     fn read_heredoc_line(&mut self) -> ReadLine {
-        // raw  — verbatim chars consumed
-        // line — normalized form: line continuations collapsed, trailing `\n`
-        //        excluded, backslash-EOF doubled (matches pre-refactor
-        //        `read_heredoc_body` semantics)
-        let mut raw = String::new();
         let mut line = String::new();
         let mut prev_backslash = false;
         let mut eof_after_backslash = false;
+        let mut terminated_at_eof = true;
         while let Some(c) = self.peek_char() {
             self.advance_char();
-            raw.push(c);
             if c == '\n' {
+                terminated_at_eof = false;
                 break;
             }
             // Line continuation: \<newline> joins lines (but not \\<newline>)
             if c == '\\' && !prev_backslash && self.peek_char() == Some('\n') {
                 self.advance_char();
-                raw.push('\n');
                 prev_backslash = false;
                 continue;
             }
@@ -178,34 +157,25 @@ impl Lexer {
             }
         }
         ReadLine {
-            raw,
             line,
             eof_after_backslash,
+            terminated_at_eof,
         }
     }
 
     /// Cmdsub edge case: the delimiter line may be followed by the closing
-    /// `)` of the command substitution with no newline between (e.g.
+    /// `)` of the outer command construct with no newline between (e.g.
     /// `$(cat <<E\nhello\nE)`). If the line has trailing `)` chars and
-    /// stripping them yields the delimiter, rewind the `)` chars out of
-    /// both `raw` and `self.pos` so the outer scanner consumes them.
-    /// Returns true if the rewind happened (and the caller should treat
-    /// the current line as the delimiter line).
-    fn try_rewind_cmdsub_close(
-        &mut self,
-        raw: &mut String,
-        line: &str,
-        delimiter: &str,
-        strip_tabs: bool,
-    ) -> bool {
-        if raw.ends_with('\n') || !raw.ends_with(')') {
+    /// stripping them yields the delimiter, rewind `self.pos` past those
+    /// `)` chars so the outer scanner consumes them. Returns true if the
+    /// rewind happened (and the caller should treat this as the delimiter
+    /// line). Caller guarantees the line terminated at EOF, not at `\n`.
+    fn try_rewind_cmdsub_close(&mut self, line: &str, delimiter: &str, strip_tabs: bool) -> bool {
+        if !line.ends_with(')') {
             return false;
         }
-        let n_paren = raw.chars().rev().take_while(|&c| c == ')').count();
-        // `)` is 1-byte ASCII so char count == byte count; trimming
-        // `n_paren` bytes from `line` is safe because `line` ends with
-        // exactly those `)` chars (`raw` and `line` diverge only on line
-        // continuations and trailing `\n`).
+        let n_paren = line.chars().rev().take_while(|&c| c == ')').count();
+        // `)` is 1-byte ASCII so char count == byte count.
         let trimmed_len = line.len().saturating_sub(n_paren);
         let without = &line[..trimmed_len];
         let without_check = if strip_tabs {
@@ -216,10 +186,7 @@ impl Lexer {
         if without_check != delimiter && without_check.trim_end() != delimiter {
             return false;
         }
-        for _ in 0..n_paren {
-            self.pos -= 1;
-            raw.pop();
-        }
+        self.pos -= n_paren;
         true
     }
 
