@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.15](https://github.com/mpecan/rable/compare/rable-v0.1.14...rable-v0.1.15) (2026-04-14)
+
+
+### Code Refactoring
+
+* **lexer:** parse $(...) via fork-and-merge instead of a sub-lexer ([34f65ad](https://github.com/mpecan/rable/commit/34f65ad99000762242394a68a3e0bff26cf826da))
+* **lexer:** parse $(...) via fork-and-merge instead of a sub-lexer ([#29](https://github.com/mpecan/rable/issues/29)) ([1399f90](https://github.com/mpecan/rable/commit/1399f90489c310678f51d0f54884f13d1d5059e0))
+* **lexer:** parse backticks via fork-and-merge ([b41ffec](https://github.com/mpecan/rable/commit/b41ffecf5fe8b27b2b5c696a62d68e491566e210)), closes [#30](https://github.com/mpecan/rable/issues/30)
+* **lexer:** parse backticks via fork-and-merge ([#33](https://github.com/mpecan/rable/issues/33)) ([b1c99d9](https://github.com/mpecan/rable/commit/b1c99d9c48932ef8716a5c90db910c9586bc77eb))
+* **lexer:** parse process substitution via fork-and-merge ([26ea44b](https://github.com/mpecan/rable/commit/26ea44b7f4667fce0b6e09a34bf5ae415d9eec48)), closes [#31](https://github.com/mpecan/rable/issues/31)
+* **lexer:** parse process substitution via fork-and-merge ([#34](https://github.com/mpecan/rable/issues/34)) ([4ce7fe9](https://github.com/mpecan/rable/commit/4ce7fe95073b850d4fc1d4901bdeb3b4d8a0f172))
+
 ## [0.1.14](https://github.com/mpecan/rable/compare/rable-v0.1.13...rable-v0.1.14) (2026-04-13)
 
 
