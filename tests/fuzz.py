@@ -274,8 +274,14 @@ def normalize(s):
     return " ".join(s.split()) if s else s
 
 
-def compare(source, verbose=False):
-    """Compare Rable output against oracle(s). Returns (match, details)."""
+def compare(source, verbose=False, valid_only=False):
+    """Compare Rable output against oracle(s). Returns (match, details).
+
+    If `valid_only` is True, inputs that the reference rejects (`<error>`)
+    are treated as matches and skipped. This filters out over-permissive
+    cases (rable accepts garbage bash rejects) so only true semantic
+    divergences on valid bash remain.
+    """
     rable_out = run_rable(source)
 
     oracle_out = run_oracle(source) if HAS_ORACLE else None
@@ -284,6 +290,9 @@ def compare(source, verbose=False):
     reference = oracle_out if oracle_out is not None else parable_out
     if reference is None:
         return True, None  # No reference available
+
+    if valid_only and reference == "<error>":
+        return True, None  # Reference rejects — not a divergence we care about
 
     rable_norm = normalize(rable_out)
     ref_norm = normalize(reference)
@@ -335,7 +344,7 @@ def cmd_mutate(args):
         if len(mutated) > 500:
             continue
 
-        match, details = compare(mutated, verbose=args.verbose)
+        match, details = compare(mutated, verbose=args.verbose, valid_only=args.valid_only)
         if not match:
             failures.append(details)
             if args.verbose:
@@ -385,7 +394,7 @@ def cmd_generate(args):
         layer = random.randint(layer_min, layer_max)
         source = generate_bash(layer)
 
-        match, details = compare(source, verbose=args.verbose)
+        match, details = compare(source, verbose=args.verbose, valid_only=args.valid_only)
         if not match:
             failures.append(details)
             if args.verbose:
@@ -443,12 +452,24 @@ def main():
     p_mutate.add_argument("-n", type=int, default=10000, help="Number of iterations")
     p_mutate.add_argument("--stop-after", type=int, default=0, help="Stop after N failures")
     p_mutate.add_argument("-v", "--verbose", action="store_true")
+    p_mutate.add_argument(
+        "--valid-only",
+        action="store_true",
+        help="Only report mismatches where the reference parses successfully "
+        "(skip cases where bash rejects the input)",
+    )
 
     p_gen = sub.add_parser("generate", help="Grammar-based generation")
     p_gen.add_argument("-n", type=int, default=5000, help="Number of iterations")
     p_gen.add_argument("--layer", type=str, default="1-3", help="Complexity layer range")
     p_gen.add_argument("--stop-after", type=int, default=0, help="Stop after N failures")
     p_gen.add_argument("-v", "--verbose", action="store_true")
+    p_gen.add_argument(
+        "--valid-only",
+        action="store_true",
+        help="Only report mismatches where the reference parses successfully "
+        "(skip cases where bash rejects the input)",
+    )
 
     p_min = sub.add_parser("minimize", help="Minimize a failing input")
     p_min.add_argument("input", help="The failing input string")
