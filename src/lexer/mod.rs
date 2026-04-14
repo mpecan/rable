@@ -56,14 +56,34 @@ pub struct Lexer {
     pub heredoc_contents: Vec<String>,
     /// End position (char index) of the most recently consumed token.
     last_token_end: usize,
-    /// True on a cmdsub fork: makes `read_heredoc_body` accept `DELIM)`
-    /// on the delimiter line and rewind the trailing `)` into the input.
-    in_cmdsub: bool,
+    /// Which nested construct, if any, this lexer is a fork of.
+    /// See [`LexerMode`] for the per-mode behaviour.
+    mode: LexerMode,
     /// Mirror of the owning `Parser::depth`, synced by `Parser::enter`
     /// and `Parser::leave`. Read by `read_command_sub` so forked inner
     /// parsers start at the outer depth — without this, nested `$(...)`
     /// could blow the native stack before hitting `MAX_DEPTH`.
     parser_depth: usize,
+}
+
+/// Which nested construct the lexer is parsing, if any.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LexerMode {
+    /// Top-level lexer, or a fork that is not inside a nested construct.
+    Normal,
+    /// Fork running inside a `$(...)` command substitution. Makes
+    /// `read_heredoc_body` accept a trailing close-paren on the
+    /// heredoc delimiter line and rewind it into the input so the
+    /// outer scanner or the fork's own grammar can consume it.
+    Cmdsub,
+    /// Fork running inside a backtick command substitution. Makes
+    /// `at_end` report end-of-input on a raw backtick so the forked
+    /// parser terminates at the closing delimiter. Backslash escape
+    /// pairs inside the body are consumed as two literal chars by
+    /// the word reader's existing backslash-escape branch, which
+    /// preserves the raw source slice that the outer lexer copies
+    /// back into `wb.value`.
+    Backtick,
 }
 
 impl Lexer {
@@ -97,15 +117,15 @@ impl Lexer {
             pending_heredocs: Vec::new(),
             heredoc_contents: Vec::new(),
             last_token_end: 0,
-            in_cmdsub: false,
+            mode: LexerMode::Normal,
             parser_depth: 0,
         }
     }
 
     /// Forks a new lexer seeded at the current position, sharing the
-    /// source buffer. Fresh token/heredoc state; runs in cmdsub mode so
-    /// `DELIM)` on a heredoc delimiter line is accepted.
-    pub(crate) fn fork(&self) -> Self {
+    /// source buffer. Fresh token/heredoc state. `mode` selects the
+    /// kind of nested construct the fork is parsing.
+    pub(crate) fn fork(&self, mode: LexerMode) -> Self {
         Self {
             input: Rc::clone(&self.input),
             pos: self.pos,
@@ -116,7 +136,7 @@ impl Lexer {
             pending_heredocs: Vec::new(),
             heredoc_contents: Vec::new(),
             last_token_end: self.pos,
-            in_cmdsub: true,
+            mode,
             parser_depth: self.parser_depth,
         }
     }
@@ -127,6 +147,21 @@ impl Lexer {
 
     pub(crate) const fn set_parser_depth(&mut self, depth: usize) {
         self.parser_depth = depth;
+    }
+
+    /// Consumes the terminating `` ` `` byte at the end of a backtick
+    /// fork. Bypasses `at_end` (which returns true on that byte in
+    /// backtick mode). Only called by `parse_backtick_body`.
+    pub(crate) fn exit_backtick_fork(&mut self) -> Result<()> {
+        if self.input.get(self.pos).copied() != Some('`') {
+            return Err(RableError::matched_pair(
+                "unterminated backtick",
+                self.pos,
+                self.line,
+            ));
+        }
+        self.pos += 1;
+        Ok(())
     }
 
     /// Returns the current position.
@@ -178,6 +213,13 @@ impl Lexer {
             }
         }
         ch
+    }
+
+    /// Returns true if the fork is sitting on its closing delimiter
+    /// (raw backtick byte in backtick mode). Used by `read_token` to
+    /// emit `Eof` and by `read_word_token` to terminate word reading.
+    pub(crate) fn at_backtick_terminator(&self) -> bool {
+        self.mode == LexerMode::Backtick && self.input.get(self.pos).copied() == Some('`')
     }
 
     /// Skips blanks (spaces and tabs) and line continuations (`\<newline>`).
@@ -245,6 +287,13 @@ impl Lexer {
     /// Core tokenization: reads the next token from input.
     fn read_token(&mut self) -> Result<Token> {
         self.skip_blanks();
+
+        // Backtick fork: the closing `` ` `` is end-of-input for the
+        // forked parser's token stream. The byte is consumed by
+        // `Lexer::exit_backtick_fork` after `parse_list` returns.
+        if self.at_backtick_terminator() {
+            return Ok(Token::eof(self.pos, self.line));
+        }
 
         // Skip comments — # starts a comment anywhere after whitespace
         if self.peek_char() == Some('#') {

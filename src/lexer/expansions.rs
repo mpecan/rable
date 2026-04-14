@@ -430,33 +430,14 @@ impl Lexer {
     }
 
     fn read_backtick_inner(&mut self, wb: &mut WordBuilder) -> Result<()> {
-        loop {
-            match self.peek_char() {
-                Some('`') => {
-                    self.advance_char();
-                    wb.push('`');
-                    return Ok(());
-                }
-                Some('\\') => {
-                    self.advance_char();
-                    wb.push('\\');
-                    if let Some(c) = self.advance_char() {
-                        wb.push(c);
-                    }
-                }
-                Some(c) => {
-                    self.advance_char();
-                    wb.push(c);
-                }
-                None => {
-                    return Err(RableError::matched_pair(
-                        "unterminated backtick",
-                        self.pos,
-                        self.line,
-                    ));
-                }
-            }
-        }
+        let body_start = self.pos;
+        let outer_depth = self.parser_depth();
+        let (end_pos, end_line) = crate::parser::parse_backtick_body(self, outer_depth)?;
+        wb.value
+            .extend(self.input[body_start..end_pos].iter().copied());
+        self.pos = end_pos;
+        self.line = end_line;
+        Ok(())
     }
 
     /// Reads deprecated `$[...]` arithmetic with bracket depth tracking.
