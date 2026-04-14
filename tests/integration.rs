@@ -209,6 +209,42 @@ const KNOWN_ORACLE_FAILURES: &[&str] = &[
     // is an artifact of bash's internal parser boundary between heredoc
     // content and the $(...) close delimiter.
     "cmdsub_formatting 9",
+    // bash_valid_divergences — collected from differential fuzzing against
+    // bash-oracle (tests/fuzz.py mutate --valid-only). Each cluster is
+    // tracked as a separate GitHub issue.
+    // #35 — ]] tokenization outside [[ ]]
+    "rbracket_outside_cond 1",
+    "rbracket_outside_cond 2",
+    "rbracket_outside_cond 3",
+    // #36 — unbalanced [...] absorbing || / &&
+    "bracket_op_split 1",
+    "bracket_op_split 2",
+    "bracket_op_split 3",
+    // #37 — reserved words as plain words
+    "reserved_word_as_word 1",
+    "reserved_word_as_word 2",
+    "reserved_word_as_word 3",
+    "reserved_word_as_word 4",
+    "reserved_word_as_word 5",
+    // #38 — backticks opaque on invalid content
+    "backtick_opaque 1",
+    "backtick_opaque 2",
+    "backtick_opaque 3",
+    "backtick_opaque 4",
+    "backtick_opaque 5",
+    "backtick_opaque 6",
+    // #39 — heredoc inside $(...)
+    "heredoc_in_cmdsub 1",
+    "heredoc_in_cmdsub 2",
+    // #40 — command-sub canonical reformat drift
+    "cmdsub_reformat 1",
+    "cmdsub_reformat 2",
+    "cmdsub_reformat 3",
+    "cmdsub_reformat 4",
+    "cmdsub_reformat 5",
+    "cmdsub_reformat 6",
+    // #41 — backslash-newline in $(( ))
+    "linecont_in_arith 1",
 ];
 
 #[derive(Default)]
@@ -309,3 +345,7 @@ oracle_test!(oracle_procsub_formatting, "procsub_formatting.tests");
 oracle_test!(oracle_redirect_formatting, "redirect_formatting.tests");
 oracle_test!(oracle_top_level_separation, "top_level_separation.tests");
 oracle_test!(oracle_word_boundaries, "word_boundaries.tests");
+oracle_test!(
+    oracle_bash_valid_divergences,
+    "bash_valid_divergences.tests"
+);
