@@ -225,9 +225,9 @@ const KNOWN_ORACLE_FAILURES: &[&str] = &[
     "backtick_opaque 4",
     "backtick_opaque 5",
     "backtick_opaque 6",
-    // #39 — heredoc inside $(...); `heredoc_in_cmdsub 1` fell out as a
-    //   side effect of #40's `<<'EOF'` quoted-delimiter fix.
-    "heredoc_in_cmdsub 2",
+    // #39 — heredoc inside $(...); both cases fixed: case 1 fell out
+    //   of #40's `<<'EOF'` fix, case 2 via the sloppy-delimiter path
+    //   in `read_heredoc_body` + `reformat_bash` using Cmdsub mode.
     // #40 — command-sub canonical reformat drift: all 6 fixed.
 ];
 

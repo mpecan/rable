@@ -7,6 +7,32 @@ use super::nodes::{format_command_words, format_node};
 use super::words::process_word_value;
 
 pub(super) fn format_redirect(node: &Node, out: &mut String) {
+    format_redirect_inline(node, out);
+    if let NodeKind::HereDoc {
+        delimiter, content, ..
+    } = &node.kind
+    {
+        out.push('\n');
+        write_heredoc_body(out, content, delimiter);
+    }
+}
+
+/// Writes a heredoc's body + closing delimiter + trailing newline.
+/// Callers prepend their own leading newline (one before the first
+/// heredoc's body, none between subsequent bodies).
+pub(super) fn write_heredoc_body(out: &mut String, content: &str, delimiter: &str) {
+    out.push_str(content);
+    out.push_str(delimiter);
+    out.push('\n');
+}
+
+/// Emits a redirect as it should appear on the command line: the full
+/// `op target` pair for a regular redirect, or just `<<DELIM` for a
+/// heredoc. The heredoc's body and closing delimiter are NOT emitted
+/// here — callers place them after the command line via
+/// [`write_heredoc_body`] so multi-heredoc commands group all ops
+/// before any bodies (bash's canonical form).
+pub(super) fn format_redirect_inline(node: &Node, out: &mut String) {
     if let NodeKind::Redirect {
         op,
         target,
@@ -44,7 +70,6 @@ pub(super) fn format_redirect(node: &Node, out: &mut String) {
         }
     } else if let NodeKind::HereDoc {
         delimiter,
-        content,
         strip_tabs,
         quoted,
         ..
@@ -53,10 +78,6 @@ pub(super) fn format_redirect(node: &Node, out: &mut String) {
         let op = if *strip_tabs { "<<-" } else { "<<" };
         out.push_str(op);
         write_heredoc_delimiter(out, delimiter, *quoted);
-        out.push('\n');
-        out.push_str(content);
-        out.push_str(delimiter);
-        out.push('\n');
     }
 }
 
@@ -124,9 +145,7 @@ fn format_command_with_heredoc_pipe(node: &Node, out: &mut String) {
                 out.push_str(op);
                 write_heredoc_delimiter(out, delimiter, *quoted);
                 out.push_str(" |\n"); // pipe on delimiter line
-                out.push_str(content);
-                out.push_str(delimiter);
-                out.push('\n');
+                write_heredoc_body(out, content, delimiter);
             } else {
                 out.push(' ');
                 format_redirect(r, out);

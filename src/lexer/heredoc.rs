@@ -81,10 +81,14 @@ impl Lexer {
     }
 
     /// Reads a here-document body until the delimiter line. In a cmdsub
-    /// fork (which process substitution also uses), an EOF line of the
-    /// form `DELIM)` (or `DELIM)))`) is also accepted as the delimiter:
-    /// the trailing `)` chars are rewound back into the input so the
-    /// outer scanner / fork grammar can consume them.
+    /// fork (which process substitution also uses), a line of the form
+    /// `DELIM<tail>` — where `<tail>` is any mix of spaces, tabs and
+    /// `)` chars containing at least one `)` — is also accepted as the
+    /// delimiter. The tail is rewound back into the input so the outer
+    /// scanner / fork grammar can consume the `)` chars as subshell /
+    /// cmdsub closers. Mirrors bash's "delimited by end-of-file"
+    /// recovery path for heredocs whose terminator is on the same line
+    /// as the enclosing construct's closing parens (issue #39).
     pub(super) fn read_heredoc_body(&mut self, delimiter: &str, strip_tabs: bool) -> String {
         let cmdsub_mode = self.mode == super::LexerMode::Cmdsub;
         let mut content = String::new();
@@ -106,8 +110,13 @@ impl Lexer {
             // Match delimiter exactly, or with trailing whitespace
             // (bash allows trailing spaces on the delimiter line)
             let mut matched = check_line == delimiter || check_line.trim_end() == delimiter;
-            if !matched && cmdsub_mode && terminated_at_eof {
-                matched = self.try_rewind_cmdsub_close(&line, delimiter, strip_tabs);
+            if !matched && cmdsub_mode {
+                matched = self.try_match_sloppy_delimiter(
+                    &line,
+                    delimiter,
+                    strip_tabs,
+                    terminated_at_eof,
+                );
             }
             if matched {
                 break;
@@ -163,30 +172,61 @@ impl Lexer {
         }
     }
 
-    /// Cmdsub edge case: the delimiter line may be followed by the closing
-    /// `)` of the outer command construct with no newline between (e.g.
-    /// `$(cat <<E\nhello\nE)`). If the line has trailing `)` chars and
-    /// stripping them yields the delimiter, rewind `self.pos` past those
-    /// `)` chars so the outer scanner consumes them. Returns true if the
-    /// rewind happened (and the caller should treat this as the delimiter
-    /// line). Caller guarantees the line terminated at EOF, not at `\n`.
-    fn try_rewind_cmdsub_close(&mut self, line: &str, delimiter: &str, strip_tabs: bool) -> bool {
-        if !line.ends_with(')') {
-            return false;
-        }
-        let n_paren = line.chars().rev().take_while(|&c| c == ')').count();
-        // `)` is 1-byte ASCII so char count == byte count.
-        let trimmed_len = line.len().saturating_sub(n_paren);
-        let without = &line[..trimmed_len];
-        let without_check = if strip_tabs {
-            without.trim_start_matches('\t')
+    /// Cmdsub sloppy-delimiter recognition: bash accepts a line of the
+    /// form `DELIM<tail>` as a heredoc terminator inside a `$(…)` /
+    /// `<(…)` / `>(…)` fork when `<tail>` is whitespace plus close-parens
+    /// and contains at least one `)`. The tail's close-parens are
+    /// intended to close the enclosing subshell / cmdsub, so we rewind
+    /// `self.pos` past the tail (and past the `\n` that terminated the
+    /// line, if any) to leave those chars for the outer grammar to
+    /// re-tokenize.
+    ///
+    /// Returns `true` if the line was a sloppy delimiter match. Called
+    /// only in `LexerMode::Cmdsub` — top-level heredocs must use the
+    /// strict delimiter rule.
+    fn try_match_sloppy_delimiter(
+        &mut self,
+        line: &str,
+        delimiter: &str,
+        strip_tabs: bool,
+        terminated_at_eof: bool,
+    ) -> bool {
+        let check = if strip_tabs {
+            line.trim_start_matches('\t')
         } else {
-            without
+            line
         };
-        if without_check != delimiter && without_check.trim_end() != delimiter {
+        let Some(tail) = check.strip_prefix(delimiter) else {
+            return false;
+        };
+        // Tail must be non-empty, contain at least one `)`, and consist
+        // only of whitespace or `)` characters. The "at least one `)`"
+        // gate prevents pure-whitespace tails from matching — at the top
+        // level bash does not accept `DELIM   ` as a terminator.
+        if tail.is_empty() || !tail.contains(')') {
             return false;
         }
-        self.pos -= n_paren;
+        if !tail.chars().all(|c| matches!(c, ' ' | '\t' | ')')) {
+            return false;
+        }
+        // Rewind: leave `self.pos` just past the delimiter characters.
+        // `read_heredoc_line` consumed `line.chars().count()` chars plus
+        // 1 extra if the line was `\n`-terminated.
+        let line_chars = line.chars().count();
+        let consumed = line_chars + usize::from(!terminated_at_eof);
+        let leading_tabs = if strip_tabs {
+            line.chars().take_while(|&c| c == '\t').count()
+        } else {
+            0
+        };
+        let retain = leading_tabs + delimiter.chars().count();
+        let rewind = consumed.saturating_sub(retain);
+        self.pos -= rewind;
+        if !terminated_at_eof {
+            // The `\n` bump from `read_heredoc_line` must be undone: the
+            // outer scanner will re-consume the `\n` and bump again.
+            self.line = self.line.saturating_sub(1);
+        }
         true
     }
 

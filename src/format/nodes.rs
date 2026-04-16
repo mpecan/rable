@@ -5,7 +5,9 @@
 use crate::ast::{CasePattern, Node, NodeKind};
 
 use super::lists::format_list;
-use super::redirects::{format_pipeline, format_redirect};
+use super::redirects::{
+    format_pipeline, format_redirect, format_redirect_inline, write_heredoc_body,
+};
 use super::words::{indent_str, process_word_value};
 
 /// Formats a single AST node into canonical bash source.
@@ -129,11 +131,32 @@ pub(super) fn format_command(
     out: &mut String,
 ) {
     format_command_words(assignments, words, out);
+    // Phase 1: all redirect heads inline on the command line.
+    // For heredocs this is just the `<<DELIM` part — the bodies are
+    // deferred so bash's canonical form can put every op on the same
+    // line regardless of heredoc ordering (see #39).
     for (i, r) in redirects.iter().enumerate() {
         if !assignments.is_empty() || !words.is_empty() || i > 0 {
             out.push(' ');
         }
-        format_redirect(r, out);
+        format_redirect_inline(r, out);
+    }
+    // Phase 2: concatenate heredoc bodies in source order after the
+    // command line. Exactly one `\n` separates the command line from
+    // the first body; consecutive bodies have none between them (each
+    // body already ends with its delimiter's trailing `\n`).
+    let mut first_heredoc = true;
+    for r in redirects {
+        if let NodeKind::HereDoc {
+            delimiter, content, ..
+        } = &r.kind
+        {
+            if first_heredoc {
+                out.push('\n');
+                first_heredoc = false;
+            }
+            write_heredoc_body(out, content, delimiter);
+        }
     }
 }
 

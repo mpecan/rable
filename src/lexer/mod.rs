@@ -130,6 +130,13 @@ impl Lexer {
         self.ctx.cond_expr = false;
     }
 
+    /// Sets the lexer mode on a freshly-constructed lexer. Used by
+    /// `reformat_bash` to re-parse cmdsub content with the relaxed
+    /// heredoc-terminator rules that the original fork used.
+    pub(crate) const fn set_mode(&mut self, mode: LexerMode) {
+        self.mode = mode;
+    }
+
     pub fn checkpoint(&self) -> LexerCheckpoint {
         LexerCheckpoint {
             pos: self.pos,

@@ -535,3 +535,20 @@ fn plain_fd_redirect_has_no_varfd() {
     assert_eq!(*fd, 3);
     assert!(varfd.is_none());
 }
+
+#[test]
+fn heredoc_in_cmdsub_with_trailing_parens() {
+    // Issue #39 case 2: the heredoc terminator line `EOF ) )` sits on
+    // the same line as the enclosing subshell + cmdsub closers. Rable
+    // must parse this (the sloppy-delimiter path in the heredoc body
+    // reader rewinds the trailing ` ) )` back into the input) and the
+    // reformatter must emit bash's canonical form.
+    let src = "$( ( cat <<EOF >>o fi utput.txt\ncontent\nEOF ) )\n";
+    let nodes = parse(src);
+    assert_eq!(nodes.len(), 1);
+    let output = format!("{}", nodes[0]);
+    assert_eq!(
+        output,
+        "(command (word \"$( ( cat fi utput.txt <<EOF >> o\\ncontent\\nEOF\\n ))\"))"
+    );
+}

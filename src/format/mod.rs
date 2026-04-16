@@ -50,6 +50,12 @@ impl Drop for DepthGuard {
 
 /// Attempts to reformat bash source into canonical form.
 /// Returns `None` if parsing fails (in which case raw text is used).
+///
+/// The re-parse runs in `LexerMode::Cmdsub` because `reformat_bash` is
+/// only ever called on content extracted from a `$(…)` / `<(…)` / `>(…)`
+/// span, and that mode enables the same sloppy heredoc-terminator
+/// recognition the original fork used (see #39 and
+/// `Lexer::try_match_sloppy_delimiter`).
 pub fn reformat_bash(source: &str) -> Option<String> {
     if source.is_empty() || source.len() > 1000 {
         return None;
@@ -65,7 +71,10 @@ pub fn reformat_bash(source: &str) -> Option<String> {
         return None;
     }
 
-    let nodes = crate::parse(source, false).ok()?;
+    let mut lexer = crate::lexer::Lexer::new(source, false);
+    lexer.set_mode(crate::lexer::LexerMode::Cmdsub);
+    let mut parser = crate::parser::Parser::new(lexer);
+    let nodes = parser.parse_all().ok()?;
     if nodes.is_empty() {
         return Some(String::new());
     }
