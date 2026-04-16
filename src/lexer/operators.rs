@@ -1,91 +1,81 @@
-use crate::error::Result;
 use crate::token::{Token, TokenType};
 
 use super::Lexer;
 
 impl Lexer {
-    #[allow(clippy::unnecessary_wraps)]
-    pub(super) fn read_pipe_operator(&mut self, start: usize, line: usize) -> Result<Token> {
+    /// Builds a token that terminates the previous simple command — any
+    /// list-separator operator (`|`, `||`, `|&`, `&`, `&&`, `;`, `;;`,
+    /// `;&`, `;;&`). Sets `command_start` and re-arms reserved-word
+    /// recognition for the token that follows. File-redirect operators
+    /// (`<<`, `>>`, `<&`, `&>`, etc.) use plain `Token::new` instead
+    /// because they do not start a new simple command.
+    fn command_token(
+        &mut self,
+        kind: TokenType,
+        text: &'static str,
+        start: usize,
+        line: usize,
+    ) -> Token {
+        self.set_command_start();
+        Token::new(kind, text, start, line)
+    }
+
+    pub(super) fn read_pipe_operator(&mut self, start: usize, line: usize) -> Token {
         self.advance_char(); // consume '|'
         match self.peek_char() {
             Some('|') => {
                 self.advance_char();
-                self.ctx.command_start = true;
-                self.ctx.reserved_words_ok = true;
-                Ok(Token::new(TokenType::Or, "||", start, line))
+                self.command_token(TokenType::Or, "||", start, line)
             }
             Some('&') => {
                 self.advance_char();
-                self.ctx.command_start = true;
-                self.ctx.reserved_words_ok = true;
-                Ok(Token::new(TokenType::PipeBoth, "|&", start, line))
+                self.command_token(TokenType::PipeBoth, "|&", start, line)
             }
-            _ => {
-                self.ctx.command_start = true;
-                self.ctx.reserved_words_ok = true;
-                Ok(Token::new(TokenType::Pipe, "|", start, line))
-            }
+            _ => self.command_token(TokenType::Pipe, "|", start, line),
         }
     }
 
-    #[allow(clippy::unnecessary_wraps)]
-    pub(super) fn read_ampersand_operator(&mut self, start: usize, line: usize) -> Result<Token> {
+    pub(super) fn read_ampersand_operator(&mut self, start: usize, line: usize) -> Token {
         self.advance_char(); // consume '&'
         match self.peek_char() {
             Some('&') => {
                 self.advance_char();
-                self.ctx.command_start = true;
-                self.ctx.reserved_words_ok = true;
-                Ok(Token::new(TokenType::And, "&&", start, line))
+                self.command_token(TokenType::And, "&&", start, line)
             }
             Some('>') => {
                 self.advance_char();
                 if self.peek_char() == Some('>') {
                     self.advance_char();
-                    Ok(Token::new(TokenType::AndDoubleGreater, "&>>", start, line))
+                    Token::new(TokenType::AndDoubleGreater, "&>>", start, line)
                 } else {
-                    Ok(Token::new(TokenType::AndGreater, "&>", start, line))
+                    Token::new(TokenType::AndGreater, "&>", start, line)
                 }
             }
-            _ => {
-                self.ctx.command_start = true;
-                self.ctx.reserved_words_ok = true;
-                Ok(Token::new(TokenType::Ampersand, "&", start, line))
-            }
+            _ => self.command_token(TokenType::Ampersand, "&", start, line),
         }
     }
 
-    #[allow(clippy::unnecessary_wraps)]
-    pub(super) fn read_semicolon_operator(&mut self, start: usize, line: usize) -> Result<Token> {
+    pub(super) fn read_semicolon_operator(&mut self, start: usize, line: usize) -> Token {
         self.advance_char(); // consume ';'
         match self.peek_char() {
             Some(';') => {
                 self.advance_char();
-                self.ctx.command_start = true;
-                self.ctx.reserved_words_ok = true;
                 if self.peek_char() == Some('&') {
                     self.advance_char();
-                    Ok(Token::new(TokenType::SemiSemiAnd, ";;&", start, line))
+                    self.command_token(TokenType::SemiSemiAnd, ";;&", start, line)
                 } else {
-                    Ok(Token::new(TokenType::DoubleSemi, ";;", start, line))
+                    self.command_token(TokenType::DoubleSemi, ";;", start, line)
                 }
             }
             Some('&') => {
                 self.advance_char();
-                self.ctx.command_start = true;
-                self.ctx.reserved_words_ok = true;
-                Ok(Token::new(TokenType::SemiAnd, ";&", start, line))
+                self.command_token(TokenType::SemiAnd, ";&", start, line)
             }
-            _ => {
-                self.ctx.command_start = true;
-                self.ctx.reserved_words_ok = true;
-                Ok(Token::new(TokenType::Semi, ";", start, line))
-            }
+            _ => self.command_token(TokenType::Semi, ";", start, line),
         }
     }
 
-    #[allow(clippy::unnecessary_wraps)]
-    pub(super) fn read_less_operator(&mut self, start: usize, line: usize) -> Result<Token> {
+    pub(super) fn read_less_operator(&mut self, start: usize, line: usize) -> Token {
         self.advance_char(); // consume '<'
         match self.peek_char() {
             Some('<') => {
@@ -93,13 +83,13 @@ impl Lexer {
                 match self.peek_char() {
                     Some('-') => {
                         self.advance_char();
-                        Ok(Token::new(TokenType::DoubleLessDash, "<<-", start, line))
+                        Token::new(TokenType::DoubleLessDash, "<<-", start, line)
                     }
                     Some('<') => {
                         self.advance_char();
-                        Ok(Token::new(TokenType::TripleLess, "<<<", start, line))
+                        Token::new(TokenType::TripleLess, "<<<", start, line)
                     }
-                    _ => Ok(Token::new(TokenType::DoubleLess, "<<", start, line)),
+                    _ => Token::new(TokenType::DoubleLess, "<<", start, line),
                 }
             }
             Some('&') => {
@@ -107,42 +97,41 @@ impl Lexer {
                 // <&- is close-fd (complete operator)
                 if self.peek_char() == Some('-') {
                     self.advance_char();
-                    Ok(Token::new(TokenType::LessAnd, "<&-", start, line))
+                    Token::new(TokenType::LessAnd, "<&-", start, line)
                 } else {
-                    Ok(Token::new(TokenType::LessAnd, "<&", start, line))
+                    Token::new(TokenType::LessAnd, "<&", start, line)
                 }
             }
             Some('>') => {
                 self.advance_char();
-                Ok(Token::new(TokenType::LessGreater, "<>", start, line))
+                Token::new(TokenType::LessGreater, "<>", start, line)
             }
-            _ => Ok(Token::new(TokenType::Less, "<", start, line)),
+            _ => Token::new(TokenType::Less, "<", start, line),
         }
     }
 
-    #[allow(clippy::unnecessary_wraps)]
-    pub(super) fn read_greater_operator(&mut self, start: usize, line: usize) -> Result<Token> {
+    pub(super) fn read_greater_operator(&mut self, start: usize, line: usize) -> Token {
         self.advance_char(); // consume '>'
         match self.peek_char() {
             Some('>') => {
                 self.advance_char();
-                Ok(Token::new(TokenType::DoubleGreater, ">>", start, line))
+                Token::new(TokenType::DoubleGreater, ">>", start, line)
             }
             Some('&') => {
                 self.advance_char();
                 // >&- is close-fd (complete operator)
                 if self.peek_char() == Some('-') {
                     self.advance_char();
-                    Ok(Token::new(TokenType::GreaterAnd, ">&-", start, line))
+                    Token::new(TokenType::GreaterAnd, ">&-", start, line)
                 } else {
-                    Ok(Token::new(TokenType::GreaterAnd, ">&", start, line))
+                    Token::new(TokenType::GreaterAnd, ">&", start, line)
                 }
             }
             Some('|') => {
                 self.advance_char();
-                Ok(Token::new(TokenType::GreaterPipe, ">|", start, line))
+                Token::new(TokenType::GreaterPipe, ">|", start, line)
             }
-            _ => Ok(Token::new(TokenType::Greater, ">", start, line)),
+            _ => Token::new(TokenType::Greater, ">", start, line),
         }
     }
 }

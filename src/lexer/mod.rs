@@ -371,9 +371,9 @@ impl Lexer {
                 }
                 Ok(Token::new(TokenType::Newline, "\n", start, line))
             }
-            '|' => self.read_pipe_operator(start, line),
-            '&' => self.read_ampersand_operator(start, line),
-            ';' => self.read_semicolon_operator(start, line),
+            '|' => Ok(self.read_pipe_operator(start, line)),
+            '&' => Ok(self.read_ampersand_operator(start, line)),
+            ';' => Ok(self.read_semicolon_operator(start, line)),
             '(' => {
                 self.advance_char();
                 Ok(Token::new(TokenType::LeftParen, "(", start, line))
@@ -387,7 +387,7 @@ impl Lexer {
                 if self.input.get(self.pos + 1) == Some(&'(') {
                     self.read_process_sub_word(start, line)
                 } else {
-                    self.read_less_operator(start, line)
+                    Ok(self.read_less_operator(start, line))
                 }
             }
             '>' => {
@@ -395,7 +395,7 @@ impl Lexer {
                 if self.input.get(self.pos + 1) == Some(&'(') {
                     self.read_process_sub_word(start, line)
                 } else {
-                    self.read_greater_operator(start, line)
+                    Ok(self.read_greater_operator(start, line))
                 }
             }
             _ => self.read_word_token(start, line),

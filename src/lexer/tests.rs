@@ -180,6 +180,54 @@ fn reserved_word_re_armed_after_separator() {
     assert_eq!(tokens[3].0, TokenType::Do);
 }
 
+#[test]
+fn list_separators_re_arm_reserved_words() {
+    // Every list-separator operator must re-arm reserved-word
+    // recognition so a following `for` is classified as a reserved
+    // word even after `foo=` has cleared the flag. This is the
+    // invariant centralised by `Lexer::command_token` (see #51).
+    for src in [
+        "foo= |& for",
+        "foo= && for",
+        "foo= || for",
+        "foo= ;; for",
+        "foo= ;& for",
+        "foo= ;;& for",
+    ] {
+        let tokens = collect_tokens(src);
+        assert_eq!(tokens.len(), 3, "`{src}`: unexpected token count");
+        assert_eq!(
+            tokens[2].0,
+            TokenType::For,
+            "`{src}`: list separator must re-arm reserved-word recognition"
+        );
+    }
+}
+
+#[test]
+fn file_redirects_do_not_re_arm_reserved_words() {
+    // File-redirect operators must NOT re-arm reserved-word
+    // recognition — they are not command separators. After `foo=`
+    // clears the flag, `for` following a redirect must stay a plain
+    // `Word`. Guards against a future edit routing a redirect branch
+    // through `command_token` (see #51).
+    for src in [
+        "foo= > f for",
+        "foo= >> f for",
+        "foo= &> f for",
+        "foo= < f for",
+        "foo= <<< f for",
+    ] {
+        let tokens = collect_tokens(src);
+        assert_eq!(tokens.len(), 4, "`{src}`: unexpected token count");
+        assert_eq!(
+            tokens[3],
+            (TokenType::Word, "for".to_string()),
+            "`{src}`: file redirect must not re-arm reserved words"
+        );
+    }
+}
+
 // -- Span recording tests --
 
 use super::word_builder::{WordSpan, WordSpanKind};
