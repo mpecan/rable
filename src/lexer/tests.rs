@@ -247,6 +247,79 @@ fn extglob_prefix_without_paren_is_ordinary_char() {
 }
 
 #[test]
+fn arithmetic_double_paren_closes_at_double_right_paren() {
+    // `$((1+2))` must tokenize as a single Word with the full
+    // `$((1+2))` text preserved. Exercises the `close_count=2`
+    // path through `read_matched_parens_inner` — the close arm
+    // must decrement twice before returning Break. Regression
+    // guard for issue #53.
+    let tokens = collect_tokens("$((1+2))");
+    assert_eq!(tokens.len(), 1, "tokens = {tokens:?}");
+    assert_eq!(tokens[0].0, TokenType::Word);
+    assert_eq!(tokens[0].1, "$((1+2))");
+}
+
+#[test]
+fn extglob_with_alternation_is_one_word() {
+    // `@(foo|bar|baz)` must tokenize as a single extglob word.
+    // The `|` arm inside `read_matched_parens_inner` must treat
+    // alternation as a word-boundary character without breaking
+    // paren depth. Regression guard for issue #53.
+    let tokens = collect_tokens("@(foo|bar|baz)");
+    assert_eq!(tokens.len(), 1, "tokens = {tokens:?}");
+    assert_eq!(tokens[0].0, TokenType::Word);
+    assert_eq!(tokens[0].1, "@(foo|bar|baz)");
+}
+
+#[test]
+fn empty_extglob_closes_at_immediate_right_paren() {
+    // `@()` at close_count=1 must tokenize as a single word even
+    // with an empty body — `handle_paren_close` hits `depth == 0`
+    // immediately and returns `Break`. Regression guard for
+    // issue #53.
+    let tokens = collect_tokens("@()");
+    assert_eq!(tokens.len(), 1, "tokens = {tokens:?}");
+    assert_eq!(tokens[0].0, TokenType::Word);
+    assert_eq!(tokens[0].1, "@()");
+}
+
+#[test]
+fn trailing_backslash_in_arith_is_graceful_error() {
+    // `\` at EOF inside `$((…))` reaches `handle_paren_escape`'s
+    // EOF fallback (the `else { wb.push('\\') }` branch), after
+    // which the outer loop hits `peek_char() == None` and must
+    // return a matched-pair error rather than panic. Regression
+    // guard for issue #53.
+    let mut lexer = Lexer::new("$(( \\", false);
+    let result = lexer.next_token();
+    assert!(result.is_err(), "expected error, got {result:?}");
+}
+
+#[test]
+fn paren_content_comment_stops_at_newline() {
+    // A `#` preceded by whitespace inside `$((…))` starts a
+    // comment that runs to the next newline; the closing `))`
+    // after the newline must still be recognized. Exercises
+    // the comment-gating arm of `read_matched_parens_inner`.
+    // Regression guard for issue #53.
+    let tokens = collect_tokens("$(( # comment\n 1+2 ))");
+    assert_eq!(tokens.len(), 1, "tokens = {tokens:?}");
+    assert_eq!(tokens[0].0, TokenType::Word);
+    // The comment text is skipped from wb.value; the word value
+    // preserves everything else including the newline.
+    assert!(
+        tokens[0].1.starts_with("$((") && tokens[0].1.ends_with("))"),
+        "unexpected word value: {:?}",
+        tokens[0].1
+    );
+    assert!(
+        !tokens[0].1.contains("comment"),
+        "comment text must be skipped: {:?}",
+        tokens[0].1
+    );
+}
+
+#[test]
 fn extglob_disabled_does_not_absorb_paren() {
     // With `extglob=false`, the config-gated extglob prefixes `!(…)`
     // and `*(…)` must NOT tokenize as single extglob words. The `(`
