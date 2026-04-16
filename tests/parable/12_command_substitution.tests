@@ -872,7 +872,7 @@ bar
 B
 )
 ---
-(command (word "x=$(cat <<A\nfoo\nA\n <<B\nbar\nB\n)"))
+(command (word "x=$(cat <<A <<B\nfoo\nA\nbar\nB\n)"))
 ---
 
 
@@ -953,4 +953,40 @@ echo $(f() { hi && echo hi; }; f)
 echo $(exec {fd}>&-)
 ---
 (command (word "echo") (word "$(exec {fd}>&-)"))
+---
+
+
+# --- #39 follow-ups: sloppy heredoc terminator edge cases ---
+
+=== tab-stripped heredoc with trailing parens in cmdsub
+$( ( cat <<-E
+	body
+	E ) )
+---
+(command (word "$( ( cat <<-E\nbody\nE\n ))"))
+---
+
+
+=== heredoc regular heredoc interleaved in cmdsub
+$(cat <<A >>o <<B
+one
+A
+two
+B
+)
+---
+(command (word "$(cat <<A >> o <<B\none\nA\ntwo\nB\n)"))
+---
+
+
+# Negative: trailing whitespace on delimiter line must not trigger the
+# sloppy-match path — it's the existing `trim_end() == delimiter`
+# path that accepts this, not #39's paren-suffix logic.
+=== heredoc trailing whitespace in cmdsub
+$(cat <<EOF
+body
+EOF
+)
+---
+(command (word "$(cat <<EOF\nbody\nEOF\n)"))
 ---
