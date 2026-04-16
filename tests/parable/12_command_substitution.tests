@@ -353,6 +353,16 @@ echo $(echo bg &)
 ---
 
 
+=== backgrounded heredoc in cmdsub
+echo $(cat <<EOF &
+body
+EOF
+)
+---
+(command (word "echo") (word "$(cat <<EOF &\nbody\nEOF\n)"))
+---
+
+
 === multiple statements in cmdsub
 echo $(echo a; echo b; echo c)
 ---

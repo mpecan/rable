@@ -3,93 +3,184 @@
 
 use crate::ast::{Node, NodeKind};
 
-use super::nodes::{format_command_words, format_node};
+use super::formatter::Formatter;
 use super::words::process_word_value;
 
-pub(super) fn format_redirect(node: &Node, out: &mut String) {
-    format_redirect_inline(node, out);
-    if let NodeKind::HereDoc {
-        delimiter, content, ..
-    } = &node.kind
-    {
-        out.push('\n');
-        write_heredoc_body(out, content, delimiter);
+impl Formatter {
+    pub(super) fn format_redirect(&mut self, node: &Node) {
+        self.format_redirect_inline(node);
+        if let NodeKind::HereDoc {
+            delimiter, content, ..
+        } = &node.kind
+        {
+            self.write_char('\n');
+            self.write_heredoc_body(content, delimiter);
+        }
     }
-}
 
-/// Writes a heredoc's body + closing delimiter + trailing newline.
-/// Callers prepend their own leading newline (one before the first
-/// heredoc's body, none between subsequent bodies).
-pub(super) fn write_heredoc_body(out: &mut String, content: &str, delimiter: &str) {
-    out.push_str(content);
-    out.push_str(delimiter);
-    out.push('\n');
-}
+    /// Writes a heredoc's body + closing delimiter + trailing newline.
+    /// Callers prepend their own leading newline (one before the first
+    /// heredoc's body, none between subsequent bodies).
+    pub(super) fn write_heredoc_body(&mut self, content: &str, delimiter: &str) {
+        self.write_str(content);
+        self.write_str(delimiter);
+        self.write_char('\n');
+    }
 
-/// Emits a redirect as it should appear on the command line: the full
-/// `op target` pair for a regular redirect, or just `<<DELIM` for a
-/// heredoc. The heredoc's body and closing delimiter are NOT emitted
-/// here — callers place them after the command line via
-/// [`write_heredoc_body`] so multi-heredoc commands group all ops
-/// before any bodies (bash's canonical form).
-pub(super) fn format_redirect_inline(node: &Node, out: &mut String) {
-    if let NodeKind::Redirect {
-        op,
-        target,
-        fd,
-        varfd,
-    } = &node.kind
-    {
+    /// Emits a redirect as it should appear on the command line: the full
+    /// `op target` pair for a regular redirect, or just `<<DELIM` for a
+    /// heredoc. The heredoc's body and closing delimiter are NOT emitted
+    /// here — callers place them after the command line via
+    /// [`Self::write_heredoc_body`] so multi-heredoc commands group all
+    /// ops before any bodies (bash's canonical form).
+    pub(super) fn format_redirect_inline(&mut self, node: &Node) {
+        match &node.kind {
+            NodeKind::Redirect { .. } => self.format_regular_redirect(node),
+            NodeKind::HereDoc { .. } => self.format_heredoc_open(node),
+            _ => {}
+        }
+    }
+
+    /// Emits a regular (non-heredoc) redirect: `[fd]op target`. Handles
+    /// the `>&-` close-fd special case where the target fd is written
+    /// before the operator (e.g. `2>&-`), the var-fd form `{name}`, and
+    /// the no-space-before-target convention for dup redirects (`>&`,
+    /// `<&`).
+    fn format_regular_redirect(&mut self, node: &Node) {
+        let NodeKind::Redirect {
+            op,
+            target,
+            fd,
+            varfd,
+        } = &node.kind
+        else {
+            return;
+        };
         // Close-fd redirects: >&- with target fd → output as "fd>&-"
         if op == ">&-" {
             if let Some(name) = varfd {
-                out.push('{');
-                out.push_str(name);
-                out.push('}');
+                self.write_char('{');
+                self.write_str(name);
+                self.write_char('}');
             } else if let NodeKind::Word { value, .. } = &target.kind {
-                out.push_str(value);
+                self.write_str(value);
             }
-            out.push_str(">&-");
+            self.write_str(">&-");
             return;
         }
         if let Some(name) = varfd {
-            out.push('{');
-            out.push_str(name);
-            out.push('}');
+            self.write_char('{');
+            self.write_str(name);
+            self.write_char('}');
         } else if *fd >= 0 && *fd != default_fd_for_op(op) {
-            out.push_str(&fd.to_string());
+            self.write_str(&fd.to_string());
         }
-        out.push_str(op);
+        self.write_str(op);
         // Dup redirects (>&, <&) don't need a space before target
         let is_dup = op == ">&" || op == "<&";
         if !is_dup {
-            out.push(' ');
+            self.write_char(' ');
         }
         if let NodeKind::Word { value, spans, .. } = &target.kind {
-            out.push_str(&process_word_value(value, spans));
+            self.write_str(&process_word_value(value, spans));
         }
-    } else if let NodeKind::HereDoc {
-        delimiter,
-        strip_tabs,
-        quoted,
-        ..
-    } = &node.kind
-    {
-        let op = if *strip_tabs { "<<-" } else { "<<" };
-        out.push_str(op);
-        write_heredoc_delimiter(out, delimiter, *quoted);
     }
-}
 
-/// Emits a heredoc opening delimiter, wrapping it in single quotes when
-/// the source used any quoting form (`<<'EOF'`, `<<"EOF"`, `<<\EOF`).
-fn write_heredoc_delimiter(out: &mut String, delimiter: &str, quoted: bool) {
-    if quoted {
-        out.push('\'');
-        out.push_str(delimiter);
-        out.push('\'');
-    } else {
-        out.push_str(delimiter);
+    /// Emits just the `<<DELIM` opening of a heredoc (or `<<-DELIM`
+    /// with tab-stripping). The body + closing delimiter are emitted
+    /// separately via [`Self::write_heredoc_body`] so multi-heredoc
+    /// commands can group all inline ops before any body.
+    fn format_heredoc_open(&mut self, node: &Node) {
+        let NodeKind::HereDoc {
+            delimiter,
+            strip_tabs,
+            quoted,
+            ..
+        } = &node.kind
+        else {
+            return;
+        };
+        let op = if *strip_tabs { "<<-" } else { "<<" };
+        self.write_str(op);
+        self.write_heredoc_delimiter(delimiter, *quoted);
+    }
+
+    /// Emits a heredoc opening delimiter, wrapping it in single quotes
+    /// when the source used any quoting form (`<<'EOF'`, `<<"EOF"`,
+    /// `<<\EOF`).
+    pub(super) fn write_heredoc_delimiter(&mut self, delimiter: &str, quoted: bool) {
+        if quoted {
+            self.write_char('\'');
+            self.write_str(delimiter);
+            self.write_char('\'');
+        } else {
+            self.write_str(delimiter);
+        }
+    }
+
+    pub(super) fn format_pipeline(&mut self, commands: &[Node]) {
+        for (i, cmd) in commands.iter().enumerate() {
+            if i > 0 {
+                // Check if previous command had a heredoc — pipe placement differs
+                let prev_has_heredoc = has_heredoc_redirect_deep(&commands[i - 1]);
+                if prev_has_heredoc {
+                    // Pipe was already placed on the heredoc delimiter line
+                    self.write_str("  ");
+                    self.format_node(cmd);
+                    continue;
+                }
+                self.write_str(" | ");
+            }
+            // Check if this command has a heredoc redirect AND is not the last in pipeline
+            if i + 1 < commands.len() && has_heredoc_redirect_deep(cmd) {
+                self.format_command_with_heredoc_pipe(cmd);
+            } else {
+                self.format_node(cmd);
+            }
+        }
+    }
+
+    /// Format a command that has a heredoc redirect, with ` |` placed on the delimiter line.
+    fn format_command_with_heredoc_pipe(&mut self, node: &Node) {
+        if let NodeKind::Command {
+            assignments,
+            words,
+            redirects,
+        } = &node.kind
+        {
+            self.format_command_words(assignments, words);
+            for r in redirects {
+                if let NodeKind::HereDoc {
+                    delimiter,
+                    content,
+                    strip_tabs,
+                    quoted,
+                    ..
+                } = &r.kind
+                {
+                    let op = if *strip_tabs { " <<-" } else { " <<" };
+                    self.write_str(op);
+                    self.write_heredoc_delimiter(delimiter, *quoted);
+                    self.write_str(" |\n"); // pipe on delimiter line
+                    self.write_heredoc_body(content, delimiter);
+                } else {
+                    self.write_char(' ');
+                    self.format_redirect(r);
+                }
+            }
+        }
+    }
+
+    /// Writes trailing redirects (e.g. after `done` on a while/for loop,
+    /// or after `esac` on a case) as space-separated `format_redirect`
+    /// emissions. Each redirect is preceded by a single space. Used by
+    /// compound-construct formatters that need to appendix a redirect
+    /// list to their terminator keyword.
+    pub(super) fn write_trailing_redirects(&mut self, redirects: &[Node]) {
+        for r in redirects {
+            self.write_char(' ');
+            self.format_redirect(r);
+        }
     }
 }
 
@@ -98,59 +189,6 @@ const fn default_fd_for_op(op: &str) -> i32 {
         b">" | b">>" | b">|" | b">&" => 1,
         b"<" | b"<&" | b"<>" => 0,
         _ => -1,
-    }
-}
-
-pub(super) fn format_pipeline(commands: &[Node], out: &mut String, indent: usize) {
-    for (i, cmd) in commands.iter().enumerate() {
-        if i > 0 {
-            // Check if previous command had a heredoc — pipe placement differs
-            let prev_has_heredoc = has_heredoc_redirect_deep(&commands[i - 1]);
-            if prev_has_heredoc {
-                // Pipe was already placed on the heredoc delimiter line
-                out.push_str("  ");
-                format_node(cmd, out, indent);
-                continue;
-            }
-            out.push_str(" | ");
-        }
-        // Check if this command has a heredoc redirect AND is not the last in pipeline
-        if i + 1 < commands.len() && has_heredoc_redirect_deep(cmd) {
-            format_command_with_heredoc_pipe(cmd, out);
-        } else {
-            format_node(cmd, out, indent);
-        }
-    }
-}
-
-/// Format a command that has a heredoc redirect, with ` |` placed on the delimiter line.
-fn format_command_with_heredoc_pipe(node: &Node, out: &mut String) {
-    if let NodeKind::Command {
-        assignments,
-        words,
-        redirects,
-    } = &node.kind
-    {
-        format_command_words(assignments, words, out);
-        for r in redirects {
-            if let NodeKind::HereDoc {
-                delimiter,
-                content,
-                strip_tabs,
-                quoted,
-                ..
-            } = &r.kind
-            {
-                let op = if *strip_tabs { " <<-" } else { " <<" };
-                out.push_str(op);
-                write_heredoc_delimiter(out, delimiter, *quoted);
-                out.push_str(" |\n"); // pipe on delimiter line
-                write_heredoc_body(out, content, delimiter);
-            } else {
-                out.push(' ');
-                format_redirect(r, out);
-            }
-        }
     }
 }
 
