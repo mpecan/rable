@@ -6,7 +6,9 @@
 
 use std::fmt;
 
+use crate::ast::NodeKind;
 use crate::format;
+use crate::lexer::word_builder::WordSpan;
 
 use super::{
     ansi_c::process_ansi_c_content, normalize_cmdsub_content, write_escaped_char,
@@ -336,4 +338,50 @@ fn collect_filtered_spans(
         }
     }
     result
+}
+
+/// Formats word-like variants: `Word`, `WordLiteral`, and `CondTerm`.
+pub(super) fn fmt_word_like(f: &mut fmt::Formatter<'_>, kind: &NodeKind) -> fmt::Result {
+    match kind {
+        NodeKind::Word { value, spans, .. } => fmt_word(f, value, spans),
+        NodeKind::WordLiteral { value } => write!(f, "{value}"),
+        NodeKind::CondTerm { value, spans } => fmt_cond_term(f, value, spans),
+        _ => unreachable!("fmt_word_like called with non-word-like variant"),
+    }
+}
+
+fn fmt_word(f: &mut fmt::Formatter<'_>, value: &str, spans: &[WordSpan]) -> fmt::Result {
+    write!(f, "(word \"")?;
+    if spans.is_empty() {
+        // Synthetic word (no lexer token) — escape directly
+        write_escaped_word(f, value)?;
+    } else {
+        let segments = segments_from_spans(value, spans);
+        write_word_segments(f, &segments)?;
+    }
+    write!(f, "\")")
+}
+
+fn fmt_cond_term(f: &mut fmt::Formatter<'_>, value: &str, spans: &[WordSpan]) -> fmt::Result {
+    // Strip `$"` locale prefix
+    let val = if value.starts_with("$\"") {
+        &value[1..]
+    } else {
+        value
+    };
+    if spans.is_empty() {
+        return write!(f, "(cond-term \"{val}\")");
+    }
+    let segments = segments_from_spans(val, spans);
+    if segments
+        .iter()
+        .all(|s| matches!(s, WordSegment::Literal(_)))
+    {
+        // No expansions needing processing
+        return write!(f, "(cond-term \"{val}\")");
+    }
+    // CondTerm uses raw output (like redirect targets)
+    write!(f, "(cond-term \"")?;
+    super::redirects::write_redirect_segments(f, &segments)?;
+    write!(f, "\")")
 }

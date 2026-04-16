@@ -112,3 +112,25 @@ pub(super) fn write_arith_command(f: &mut fmt::Formatter<'_>, raw_content: &str)
     write_escaped_word(f, raw_content)?;
     write!(f, "\"))")
 }
+
+/// Formats redirect-like variants: `Redirect`, `HereDoc`, and
+/// `ArithmeticCommand`.
+pub(super) fn fmt_redirect_like(f: &mut fmt::Formatter<'_>, kind: &NodeKind) -> fmt::Result {
+    match kind {
+        NodeKind::Redirect { op, target, fd, .. } => write_redirect(f, op, target, *fd),
+        NodeKind::HereDoc {
+            content,
+            strip_tabs,
+            ..
+        } => write_heredoc(f, content, *strip_tabs),
+        NodeKind::ArithmeticCommand {
+            redirects,
+            raw_content,
+            ..
+        } => {
+            write_arith_command(f, raw_content)?;
+            super::write_redirects(f, redirects)
+        }
+        _ => unreachable!("fmt_redirect_like called with non-redirect-like variant"),
+    }
+}
