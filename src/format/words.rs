@@ -11,14 +11,10 @@ use crate::sexp::{normalize_cmdsub_content, process_ansi_c_content};
 
 use super::reformat_bash;
 
-pub(super) fn indent_str(out: &mut String, n: usize) {
-    for _ in 0..n {
-        out.push(' ');
-    }
-}
-
 /// Process a word value for canonical bash output using span-based
-/// segment extraction.
+/// segment extraction. Returns a fresh `String` rather than writing to
+/// a `Formatter` because callers embed the result into larger strings
+/// (e.g. next to a redirect operator) via `Formatter::write_str`.
 pub(super) fn process_word_value(value: &str, spans: &[WordSpan]) -> String {
     let segments = segments_from_spans(value, spans);
     let mut result = String::with_capacity(value.len());

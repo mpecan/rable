@@ -2,16 +2,21 @@
 //!
 //! Re-parses bash source and produces the canonical indented format
 //! that Parable outputs inside `$(...)`. The implementation is split
-//! across sibling files by topic:
+//! across sibling files by topic, all hanging off the `Formatter`
+//! struct defined in `formatter.rs`:
 //!
-//! | file          | responsibility                                       |
-//! |---------------|------------------------------------------------------|
-//! | `mod.rs`      | `reformat_bash` entry + recursion depth guard        |
-//! | `nodes.rs`    | `format_node` dispatch and compound constructs       |
-//! | `redirects.rs`| redirect / pipeline / heredoc-pipe interactions      |
-//! | `lists.rs`    | `;`, `&&`, `\|\|`, `&` operator placement            |
-//! | `words.rs`    | span-based word-value reconstruction and indent util |
+//! | file            | responsibility                                    |
+//! |-----------------|---------------------------------------------------|
+//! | `mod.rs`        | `reformat_bash` entry + recursion depth guard     |
+//! | `formatter.rs`  | `Formatter` struct + low-level write primitives   |
+//! | `nodes.rs`      | `format_node` dispatch + command / cond-node      |
+//! | `compound.rs`   | if / while / for / case / function / subshell / … |
+//! | `redirects.rs`  | redirect / pipeline / heredoc-pipe interactions   |
+//! | `lists.rs`      | `;`, `&&`, `\|\|`, `&` operator placement         |
+//! | `words.rs`      | span-based word-value reconstruction              |
 
+mod compound;
+mod formatter;
 mod lists;
 mod nodes;
 mod redirects;
@@ -19,7 +24,7 @@ mod words;
 
 use std::cell::Cell;
 
-use nodes::format_node;
+use formatter::Formatter;
 
 thread_local! {
     static REFORMAT_DEPTH: Cell<usize> = const { Cell::new(0) };
@@ -78,14 +83,12 @@ pub fn reformat_bash(source: &str) -> Option<String> {
     if nodes.is_empty() {
         return Some(String::new());
     }
-    let mut out = String::new();
+    let mut f = Formatter::new();
     for (i, node) in nodes.iter().enumerate() {
         if i > 0 {
-            out.push('\n');
+            f.write_char('\n');
         }
-        format_node(node, &mut out, 0);
+        f.format_node(node);
     }
-    // Trim trailing spaces/tabs but NOT newlines (heredocs need those)
-    let trimmed = out.trim_end_matches([' ', '\t']);
-    Some(trimmed.to_string())
+    Some(f.finish())
 }
