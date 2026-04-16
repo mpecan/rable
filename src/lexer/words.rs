@@ -1,3 +1,5 @@
+use std::ops::ControlFlow;
+
 use crate::error::{RableError, Result};
 use crate::token::{Token, TokenType};
 
@@ -6,72 +8,39 @@ use super::word_builder::{WordBuilder, WordSpanKind};
 
 impl Lexer {
     /// Reads a word token, handling quoting and expansions.
-    #[allow(clippy::too_many_lines)]
+    ///
+    /// Structured as three phases: character-by-character assembly via
+    /// the `while let`/`match` loop, classification of the accumulated
+    /// value (`classify_word`), and context-flag update for the next
+    /// token (`advance_word_context`).
     pub(super) fn read_word_token(&mut self, start: usize, line: usize) -> Result<Token> {
         let mut wb = WordBuilder::new();
-
         while let Some(c) = self.peek_char() {
             match c {
-                // Metacharacters end a word
+                // Metacharacters end a word.
                 ' ' | '\t' | '\n' | '|' | '&' | ';' | ')' => break,
                 // Closing delimiter of a backtick fork ends the word.
                 // The byte is consumed later by `exit_backtick_fork`.
                 '`' if self.at_backtick_terminator() => break,
-                // < and > are metacharacters, but <( and >( are process substitution
                 '<' | '>' => {
-                    if !wb.is_empty() && self.input.get(self.pos + 1) == Some(&'(') {
-                        // Process substitution mid-word: cat<(cmd)
-                        self.read_process_sub_into(&mut wb)?;
-                    } else {
+                    if self.read_angle_bracket_word(&mut wb)?.is_break() {
                         break;
                     }
                 }
-                // ( is a metacharacter UNLESS preceded by = (array) or extglob prefix
                 '(' => {
-                    if wb.ends_with('=') {
-                        // Array assignment: arr=(...) — parse elements directly
-                        self.advance_char();
-                        wb.push('(');
-                        self.read_array_elements(&mut wb)?;
-                    } else if wb.ends_with('@')
-                        || wb.ends_with('?')
-                        || wb.ends_with('+')
-                        || (wb.ends_with('!') && self.config.extglob)
-                        || (wb.ends_with('*') && self.config.extglob)
-                    {
-                        // Extglob: @(...), ?(...), etc.
-                        self.advance_char();
-                        wb.push('(');
-                        self.read_matched_parens(&mut wb, 1)?;
-                    } else {
+                    if self.read_open_paren_word(&mut wb)?.is_break() {
                         break;
                     }
                 }
                 '\'' | '"' | '\\' | '$' | '`' => {
                     self.read_word_special(&mut wb, c)?;
                 }
-                // Extglob: @(...), ?(...), +(...), !(...)
-                // !( is only extglob when extglob is enabled; otherwise ! is Bang
-                '@' | '?' | '+' if self.input.get(self.pos + 1) == Some(&'(') => {
+                c if self.is_extglob_trigger(c) => {
                     self.read_extglob(&mut wb, c)?;
                 }
-                // !( and *( are only extglob when extglob mode is enabled
-                '!' | '*' if self.input.get(self.pos + 1) == Some(&'(') && self.config.extglob => {
-                    self.read_extglob(&mut wb, c)?;
-                }
-                // `[` inside a word enters the bracket-subscript context when:
-                //   * we're at command-start after a plain identifier
-                //     (covers `arr[i]=val` assignments and `foo[...]` calls
-                //     where bash absorbs whitespace / metacharacters); or
-                //   * we're inside `[[ ]]`, where bash parses regex character
-                //     classes like `[[:alpha:][:digit:]]` as a single word.
-                // In any other position a bare `[` is an ordinary character.
-                '[' if (self.ctx.command_start && is_identifier_prefix(&wb.value))
-                    || (self.ctx.cond_expr && !wb.is_empty() && !wb.ends_with('[')) =>
-                {
+                '[' if self.word_enters_bracket_subscript(&wb) => {
                     self.read_bracket_subscript(&mut wb)?;
                 }
-                // Regular character
                 _ => {
                     self.advance_char();
                     wb.push(c);
@@ -85,15 +54,89 @@ impl Lexer {
             return Err(RableError::parse("unexpected character", start, line));
         }
 
-        // Check for reserved words at command start, then assignment pattern.
-        // Reserved-word classification requires BOTH `command_start` and
-        // `reserved_words_ok` (issue #37): once a simple command has
-        // consumed an AssignmentWord, bash stops recognizing reserved
-        // words in that same command even though we're still at command
-        // position. Additionally, `]]` is only a reserved word inside a
-        // `[[ ]]` conditional (issue #35); elsewhere it's an ordinary word
-        // so the parser doesn't mistake it for a terminator.
-        let mut kind = if self.ctx.command_start && self.ctx.reserved_words_ok {
+        let kind = self.classify_word(&wb);
+        self.advance_word_context(kind);
+        Ok(Token::with_spans(kind, wb.value, start, line, wb.spans))
+    }
+
+    // -- word-assembly dispatch helpers --
+
+    /// Handles a `<` or `>` encountered mid-word. If followed by `(` and
+    /// the word so far is non-empty, reads a process substitution
+    /// (`cat<(cmd)`) into `wb` and returns `Continue`. Otherwise the
+    /// character is a metacharacter that terminates the word, and we
+    /// return `Break`.
+    fn read_angle_bracket_word(&mut self, wb: &mut WordBuilder) -> Result<ControlFlow<()>> {
+        if !wb.is_empty() && self.input.get(self.pos + 1) == Some(&'(') {
+            self.read_process_sub_into(wb)?;
+            Ok(ControlFlow::Continue(()))
+        } else {
+            Ok(ControlFlow::Break(()))
+        }
+    }
+
+    /// Handles `(` encountered mid-word. Three outcomes:
+    ///
+    /// * preceded by `=` — array assignment `arr=(…)`; consume the
+    ///   parenthesised element list and keep reading.
+    /// * preceded by an extglob prefix (`@`, `?`, `+`, or `!`/`*` when
+    ///   extglob is on) — extglob pattern `@(…)`, `*(…)`, etc.
+    /// * otherwise `(` is a metacharacter that terminates the word.
+    fn read_open_paren_word(&mut self, wb: &mut WordBuilder) -> Result<ControlFlow<()>> {
+        if wb.ends_with('=') {
+            self.advance_char();
+            wb.push('(');
+            self.read_array_elements(wb)?;
+            Ok(ControlFlow::Continue(()))
+        } else if wb.ends_with('@')
+            || wb.ends_with('?')
+            || wb.ends_with('+')
+            || (wb.ends_with('!') && self.config.extglob)
+            || (wb.ends_with('*') && self.config.extglob)
+        {
+            self.advance_char();
+            wb.push('(');
+            self.read_matched_parens(wb, 1)?;
+            Ok(ControlFlow::Continue(()))
+        } else {
+            Ok(ControlFlow::Break(()))
+        }
+    }
+
+    /// Returns true if `c` at the current position opens an extglob
+    /// pattern: a prefix character (`@`, `?`, `+`, and `!`/`*` when
+    /// `config.extglob` is enabled) followed immediately by `(`.
+    fn is_extglob_trigger(&self, c: char) -> bool {
+        if self.input.get(self.pos + 1) != Some(&'(') {
+            return false;
+        }
+        matches!(c, '@' | '?' | '+') || (matches!(c, '!' | '*') && self.config.extglob)
+    }
+
+    /// Returns true if a `[` at the current position should open a
+    /// bracket-subscript absorption (`arr[i]=val`, `arr[i]` at command
+    /// start, or regex character classes inside `[[ ]]`).
+    ///
+    /// In any other position a bare `[` is just an ordinary character
+    /// so the word reader falls through to the `_` arm.
+    fn word_enters_bracket_subscript(&self, wb: &WordBuilder) -> bool {
+        (self.ctx.command_start && is_identifier_prefix(&wb.value))
+            || (self.ctx.cond_expr && !wb.is_empty() && !wb.ends_with('['))
+    }
+
+    // -- word finalisation --
+
+    /// Classifies an assembled word value into a `TokenType`.
+    ///
+    /// Reserved-word classification requires BOTH `command_start` and
+    /// `reserved_words_ok` (issue #37): once a simple command has
+    /// consumed an `AssignmentWord`, bash stops recognising reserved
+    /// words in that same command even though we're still at command
+    /// position. Additionally, `]]` is only a reserved word inside a
+    /// `[[ ]]` conditional (issue #35); elsewhere it's an ordinary
+    /// word so the parser doesn't mistake it for a terminator.
+    fn classify_word(&self, wb: &WordBuilder) -> TokenType {
+        let kind = if self.ctx.command_start && self.ctx.reserved_words_ok {
             TokenType::reserved_word(&wb.value).unwrap_or_else(|| {
                 if is_assignment_word(&wb.value) {
                     TokenType::AssignmentWord
@@ -107,18 +150,25 @@ impl Lexer {
             TokenType::Word
         };
         if kind == TokenType::DoubleRightBracket && !self.ctx.cond_expr {
-            kind = TokenType::Word;
+            TokenType::Word
+        } else {
+            kind
         }
+    }
 
-        // Update context flags for the next token.
-        //
-        // AssignmentWord keeps `command_start=true` (assignments chain and
-        // the eventual command word is still at command position) but clears
-        // `reserved_words_ok` — no more reserved words in this simple command.
-        //
-        // Other words follow the existing rule: command_start re-arms only
-        // for keywords that start a new command (`then`, `else`, ...), and
-        // `reserved_words_ok` tracks `command_start` directly.
+    /// Updates `command_start` / `reserved_words_ok` for the token
+    /// that follows the word just emitted.
+    ///
+    /// `AssignmentWord` keeps `command_start=true` (assignments chain
+    /// and the eventual command word is still at command position)
+    /// but clears `reserved_words_ok` — no more reserved words in
+    /// this simple command.
+    ///
+    /// Other words follow the existing rule: `command_start` re-arms
+    /// only for keywords that start a new command (`then`, `else`,
+    /// `elif`, `do`, `;`), and `reserved_words_ok` tracks
+    /// `command_start` directly.
+    fn advance_word_context(&mut self, kind: TokenType) {
         if kind == TokenType::AssignmentWord {
             self.ctx.command_start = true;
             self.ctx.reserved_words_ok = false;
@@ -134,8 +184,6 @@ impl Lexer {
                 );
             self.ctx.reserved_words_ok = self.ctx.command_start;
         }
-
-        Ok(Token::with_spans(kind, wb.value, start, line, wb.spans))
     }
 
     /// Reads a quoted string, escape, dollar expansion, or backtick within a word.
