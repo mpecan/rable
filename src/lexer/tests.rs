@@ -228,6 +228,42 @@ fn file_redirects_do_not_re_arm_reserved_words() {
     }
 }
 
+#[test]
+fn extglob_prefix_without_paren_is_ordinary_char() {
+    // `is_extglob_trigger` (see read_word_token dispatch) fires only
+    // when the prefix char is immediately followed by `(`. Bare
+    // `@`, `?`, `+`, `!`, `*` without a following `(` must be
+    // consumed as ordinary word characters. Regression guard for
+    // issue #52: centralising the extglob-arm split.
+    for src in ["foo@bar", "foo?bar", "foo+bar", "foo!bar", "foo*bar"] {
+        let tokens = collect_tokens(src);
+        assert_eq!(tokens.len(), 1, "`{src}`: unexpected token count");
+        assert_eq!(
+            tokens[0],
+            (TokenType::Word, src.to_string()),
+            "`{src}`: prefix char without `(` must stay an ordinary word char"
+        );
+    }
+}
+
+#[test]
+fn extglob_disabled_does_not_absorb_paren() {
+    // With `extglob=false`, the config-gated extglob prefixes `!(…)`
+    // and `*(…)` must NOT tokenize as single extglob words. The `(`
+    // must appear as a distinct `LeftParen` token instead of being
+    // absorbed into the word. Guards the `config.extglob` branch of
+    // `is_extglob_trigger`, which is otherwise only covered by
+    // integration tests that enable extglob.
+    for src in ["!(cmd)", "foo*(bar)"] {
+        let tokens = collect_tokens(src);
+        let has_left_paren = tokens.iter().any(|(k, _)| *k == TokenType::LeftParen);
+        assert!(
+            has_left_paren,
+            "`{src}` with extglob=false: expected a LeftParen token, got {tokens:?}"
+        );
+    }
+}
+
 // -- Span recording tests --
 
 use super::word_builder::{WordSpan, WordSpanKind};
