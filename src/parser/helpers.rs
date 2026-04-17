@@ -1,7 +1,26 @@
 //! Helper functions for the parser.
 
 use crate::ast::{Node, NodeKind};
-use crate::token::Token;
+use crate::token::{Token, TokenType};
+
+/// Returns true for the 12 token kinds that start a redirect operator.
+pub(super) const fn is_redirect_op_kind(kind: TokenType) -> bool {
+    matches!(
+        kind,
+        TokenType::Less
+            | TokenType::Greater
+            | TokenType::DoubleGreater
+            | TokenType::LessAnd
+            | TokenType::GreaterAnd
+            | TokenType::LessGreater
+            | TokenType::GreaterPipe
+            | TokenType::AndGreater
+            | TokenType::AndDoubleGreater
+            | TokenType::DoubleLess
+            | TokenType::DoubleLessDash
+            | TokenType::TripleLess
+    )
+}
 
 /// Creates a `Word` node from a lexer token, moving value and spans.
 pub fn word_node_from_token(tok: Token) -> Node {

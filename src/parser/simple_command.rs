@@ -2,10 +2,10 @@
 
 use crate::ast::{Node, NodeKind, Span};
 use crate::error::{RableError, Result};
-use crate::token::TokenType;
+use crate::token::{Token, TokenType};
 
 use super::Parser;
-use super::helpers::{is_fd_number, is_varfd};
+use super::helpers::{is_fd_number, is_redirect_op_kind, is_varfd};
 use super::word_parts;
 
 impl Parser {
@@ -63,7 +63,6 @@ impl Parser {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
     fn parse_simple_command(&mut self) -> Result<Node> {
         let start = self.peek_pos()?;
         let mut assignments = Vec::new();
@@ -77,62 +76,29 @@ impl Parser {
             }
             let tok = self.lexer.peek_token()?;
             match tok.kind {
-                TokenType::Less
-                | TokenType::Greater
-                | TokenType::DoubleGreater
-                | TokenType::LessAnd
-                | TokenType::GreaterAnd
-                | TokenType::LessGreater
-                | TokenType::GreaterPipe
-                | TokenType::AndGreater
-                | TokenType::AndDoubleGreater
-                | TokenType::DoubleLess
-                | TokenType::DoubleLessDash
-                | TokenType::TripleLess => {
+                kind if is_redirect_op_kind(kind) => {
                     redirects.push(self.parse_redirect()?);
                 }
                 TokenType::Word | TokenType::AssignmentWord | TokenType::Number => {
                     let is_assignment = tok.kind == TokenType::AssignmentWord;
                     let tok = self.lexer.next_token()?;
-                    // fd numbers before redirects — only when adjacent (no space)
-                    // and never before &> or &>>
-                    let adjacent = self
-                        .lexer
-                        .peek_token()
-                        .map(|next| tok.adjacent_to(next))
-                        .unwrap_or(false);
-                    if adjacent
-                        && is_fd_number(&tok.value)
-                        && self.is_redirect_operator()?
-                        && !self.is_and_redirect()?
+                    if let Some(redirect) = self.try_parse_fd_redirect(&tok)? {
+                        redirects.push(redirect);
+                        continue;
+                    }
+                    if !saw_command_word
+                        && assignments.is_empty()
+                        && words.is_empty()
+                        && self.peek_is(TokenType::LeftParen)?
                     {
-                        redirects.push(self.parse_redirect_with_fd(&tok)?);
-                    } else if adjacent && is_varfd(&tok.value) && self.is_redirect_operator()? {
-                        redirects.push(self.parse_redirect_with_varfd(&tok)?);
+                        return self.parse_function_def(&tok);
+                    }
+                    let node = build_word_node(tok);
+                    if is_assignment && !saw_command_word {
+                        assignments.push(node);
                     } else {
-                        if !saw_command_word
-                            && assignments.is_empty()
-                            && words.is_empty()
-                            && self.peek_is(TokenType::LeftParen)?
-                        {
-                            return self.parse_function_def(&tok);
-                        }
-                        let word_span = Span::new(tok.pos, tok.pos + tok.value.len());
-                        let parts = word_parts::decompose_word_with_spans(&tok.value, &tok.spans);
-                        let node = Node::new(
-                            NodeKind::Word {
-                                value: tok.value,
-                                parts,
-                                spans: tok.spans,
-                            },
-                            word_span,
-                        );
-                        if is_assignment && !saw_command_word {
-                            assignments.push(node);
-                        } else {
-                            saw_command_word = true;
-                            words.push(node);
-                        }
+                        saw_command_word = true;
+                        words.push(node);
                     }
                 }
                 _ => break,
@@ -152,4 +118,42 @@ impl Parser {
             },
         ))
     }
+
+    /// If `tok` is adjacent to an fd-style redirect prefix (`NN<`, `{var}<`),
+    /// consume the redirect and return it. Otherwise return `Ok(None)` so
+    /// the caller treats `tok` as a regular word/assignment.
+    fn try_parse_fd_redirect(&mut self, tok: &Token) -> Result<Option<Node>> {
+        let adjacent = self
+            .lexer
+            .peek_token()
+            .map(|next| tok.adjacent_to(next))
+            .unwrap_or(false);
+        if !adjacent {
+            return Ok(None);
+        }
+        if is_fd_number(&tok.value) && self.is_redirect_operator()? && !self.is_and_redirect()? {
+            return Ok(Some(self.parse_redirect_with_fd(tok)?));
+        }
+        if is_varfd(&tok.value) && self.is_redirect_operator()? {
+            return Ok(Some(self.parse_redirect_with_varfd(tok)?));
+        }
+        Ok(None)
+    }
+}
+
+/// Builds a `Word` node from a consumed token, preserving the token's
+/// position as the node span. Distinct from `helpers::word_node_from_token`,
+/// which uses `Node::empty` (no span) for AST constructors where positional
+/// information is not available.
+fn build_word_node(tok: Token) -> Node {
+    let word_span = Span::new(tok.pos, tok.pos + tok.value.len());
+    let parts = word_parts::decompose_word_with_spans(&tok.value, &tok.spans);
+    Node::new(
+        NodeKind::Word {
+            value: tok.value,
+            parts,
+            spans: tok.spans,
+        },
+        word_span,
+    )
 }
