@@ -127,40 +127,57 @@ impl Parser {
         Ok(left)
     }
 
-    #[allow(clippy::too_many_lines)]
     fn parse_cond_primary(&mut self) -> Result<Node> {
         let start = self.peek_pos()?;
-        let tok = self.lexer.peek_token()?;
+        let kind = self.lexer.peek_token()?.kind;
 
-        // Handle ! (negation) — Parable drops it in S-expression output,
-        // but we keep it in the AST so the reformatter can preserve it.
-        if tok.kind == TokenType::Bang {
-            self.lexer.next_token()?;
-            let inner = self.parse_cond_primary()?;
-            return Ok(self.spanned(
-                start,
-                NodeKind::CondNot {
-                    operand: Box::new(inner),
-                },
-            ));
+        if let Some(node) = self.try_parse_cond_negation(start, kind)? {
+            return Ok(node);
         }
-
-        // Handle ( grouped expression )
-        if tok.kind == TokenType::LeftParen {
-            self.lexer.next_token()?;
-            let inner = self.parse_cond_or()?;
-            self.expect(TokenType::RightParen)?;
-            return Ok(self.spanned(
-                start,
-                NodeKind::CondParen {
-                    inner: Box::new(inner),
-                },
-            ));
+        if let Some(node) = self.try_parse_cond_group(start, kind)? {
+            return Ok(node);
         }
 
         let first = self.lexer.next_token()?;
+        self.parse_cond_operand(start, first)
+    }
 
-        // Check for unary operators: -f, -d, -z, -n, etc.
+    /// `! expr` — Parable drops the negation in S-expression output, but we
+    /// keep it in the AST so the reformatter can preserve it.
+    fn try_parse_cond_negation(&mut self, start: usize, kind: TokenType) -> Result<Option<Node>> {
+        if kind != TokenType::Bang {
+            return Ok(None);
+        }
+        self.lexer.next_token()?;
+        let inner = self.parse_cond_primary()?;
+        Ok(Some(self.spanned(
+            start,
+            NodeKind::CondNot {
+                operand: Box::new(inner),
+            },
+        )))
+    }
+
+    /// `( expr )` — a grouped expression inside `[[ … ]]`.
+    fn try_parse_cond_group(&mut self, start: usize, kind: TokenType) -> Result<Option<Node>> {
+        if kind != TokenType::LeftParen {
+            return Ok(None);
+        }
+        self.lexer.next_token()?;
+        let inner = self.parse_cond_or()?;
+        self.expect(TokenType::RightParen)?;
+        Ok(Some(self.spanned(
+            start,
+            NodeKind::CondParen {
+                inner: Box::new(inner),
+            },
+        )))
+    }
+
+    /// Parse `-f EXPR` (unary), `EXPR OP EXPR` (binary), or a bare word
+    /// (`[-n] EXPR`). `first` is the already-consumed leading token.
+    fn parse_cond_operand(&mut self, start: usize, first: Token) -> Result<Node> {
+        // Unary operators: -f, -d, -z, -n, etc.
         if first.value.starts_with('-')
             && first.value.len() <= 3
             && self.peek_cond_term()?.is_some()
@@ -175,7 +192,7 @@ impl Parser {
             ));
         }
 
-        // Check for binary operators
+        // Binary operators: ==, !=, =~, <, >, -eq, -ne, ...
         if !self.is_cond_close()?
             && !self.peek_is(TokenType::And)?
             && !self.peek_is(TokenType::Or)?

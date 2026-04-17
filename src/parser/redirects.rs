@@ -7,7 +7,9 @@ use crate::lexer::heredoc::parse_heredoc_delimiter;
 use crate::token::{Token, TokenType};
 
 use super::Parser;
-use super::helpers::{is_fd_number, is_varfd, word_node, word_node_from_token};
+use super::helpers::{
+    is_fd_number, is_redirect_op_kind, is_varfd, word_node, word_node_from_token,
+};
 
 impl Parser {
     pub(super) fn parse_redirect(&mut self) -> Result<Node> {
@@ -165,20 +167,6 @@ impl Parser {
 
     pub(super) fn is_redirect_operator(&mut self) -> Result<bool> {
         let tok = self.lexer.peek_token()?;
-        Ok(matches!(
-            tok.kind,
-            TokenType::Less
-                | TokenType::Greater
-                | TokenType::DoubleGreater
-                | TokenType::LessAnd
-                | TokenType::GreaterAnd
-                | TokenType::LessGreater
-                | TokenType::GreaterPipe
-                | TokenType::AndGreater
-                | TokenType::AndDoubleGreater
-                | TokenType::DoubleLess
-                | TokenType::DoubleLessDash
-                | TokenType::TripleLess
-        ))
+        Ok(is_redirect_op_kind(tok.kind))
     }
 }
