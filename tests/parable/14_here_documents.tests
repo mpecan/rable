@@ -557,3 +557,45 @@ EOF
 next
 "))
 ---
+
+
+=== heredoc in if else branch
+if true; then cat <<A
+first
+A
+else cat <<B
+second
+B
+fi
+---
+(if (command (word "true")) (command (word "cat") (redirect "<<" "first
+")) (command (word "cat") (redirect "<<" "second
+")))
+---
+
+
+=== heredoc in case pattern body
+case $x in a) cat <<EOF
+content
+EOF
+;;
+esac
+---
+(case (word "$x") (pattern ((word "a")) (command (word "cat") (redirect "<<" "content
+"))))
+---
+
+
+=== heredoc nested while inside if else
+if true; then while false; do cat <<A
+outer
+A
+done; else cat <<B
+inner
+B
+fi
+---
+(if (command (word "true")) (while (command (word "false")) (command (word "cat") (redirect "<<" "outer
+"))) (command (word "cat") (redirect "<<" "inner
+")))
+---
