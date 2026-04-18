@@ -1,3 +1,5 @@
+#![allow(clippy::redundant_pub_crate)]
+
 use std::rc::Rc;
 
 use crate::error::{RableError, Result};
@@ -5,16 +7,16 @@ use crate::token::{Token, TokenType};
 
 mod brace_expansion;
 mod expansions;
-pub mod heredoc;
+pub(crate) mod heredoc;
 mod operators;
 mod quotes;
-pub mod word_builder;
+pub(super) mod word_builder;
 mod words;
 
 #[cfg(test)]
 mod tests;
 
-pub use heredoc::PendingHereDoc;
+pub(crate) use heredoc::PendingHereDoc;
 
 /// Immutable lexer configuration set at construction time.
 #[derive(Debug, Clone, Copy)]
@@ -26,18 +28,18 @@ struct LexerConfig {
 /// Mutable context flags the parser uses to inform the lexer.
 /// Private — the parser interacts via methods on `Lexer`.
 #[derive(Debug, Clone)]
-pub struct LexerContext {
+pub(crate) struct LexerContext {
     /// At command start position — eligible to begin a new simple command
     /// or to accept an `AssignmentWord`.
-    pub command_start: bool,
+    pub(crate) command_start: bool,
     /// Reserved-word recognition is enabled. Distinct from `command_start`:
     /// after a simple command has consumed one or more `AssignmentWord`s,
     /// subsequent words must NOT be classified as reserved words, even
     /// though we are still at command-word position. Re-armed whenever
     /// `command_start` is re-armed (separators, newlines, etc.).
-    pub reserved_words_ok: bool,
+    pub(crate) reserved_words_ok: bool,
     /// Inside a `[[ ]]` conditional expression.
-    pub cond_expr: bool,
+    pub(crate) cond_expr: bool,
 }
 
 impl Default for LexerContext {
@@ -51,7 +53,7 @@ impl Default for LexerContext {
 }
 
 /// Hand-written context-sensitive lexer for bash.
-pub struct Lexer {
+pub(crate) struct Lexer {
     input: Rc<[char]>,
     pos: usize,
     line: usize,
@@ -59,9 +61,9 @@ pub struct Lexer {
     config: LexerConfig,
     pub(crate) ctx: LexerContext,
     /// Pending here-documents to be read after the next newline.
-    pub pending_heredocs: Vec<PendingHereDoc>,
+    pub(crate) pending_heredocs: Vec<PendingHereDoc>,
     /// Completed here-document contents (filled after newline).
-    pub heredoc_contents: Vec<String>,
+    pub(crate) heredoc_contents: Vec<String>,
     /// End position (char index) of the most recently consumed token.
     last_token_end: usize,
     /// Which nested construct, if any, this lexer is a fork of.
@@ -82,7 +84,7 @@ pub struct Lexer {
 /// `pending_heredocs`, and `heredoc_contents` are deliberately omitted
 /// because the arithmetic parse does not observe newlines or heredocs.
 #[derive(Debug, Clone)]
-pub struct LexerCheckpoint {
+pub(crate) struct LexerCheckpoint {
     pos: usize,
     line: usize,
     peeked: Option<Token>,
@@ -91,7 +93,7 @@ pub struct LexerCheckpoint {
 
 /// Which nested construct the lexer is parsing, if any.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LexerMode {
+pub(crate) enum LexerMode {
     /// Top-level lexer, or a fork that is not inside a nested construct.
     Normal,
     /// Fork running inside a `$(...)` command substitution. Makes
@@ -115,18 +117,18 @@ impl Lexer {
     /// Signal that the next word position is a command start. Also
     /// re-arms reserved-word recognition — a fresh command is always
     /// allowed to begin with a reserved word.
-    pub const fn set_command_start(&mut self) {
+    pub(crate) const fn set_command_start(&mut self) {
         self.ctx.command_start = true;
         self.ctx.reserved_words_ok = true;
     }
 
     /// Signal entering a `[[ ]]` conditional expression context.
-    pub const fn enter_cond_expr(&mut self) {
+    pub(crate) const fn enter_cond_expr(&mut self) {
         self.ctx.cond_expr = true;
     }
 
     /// Signal leaving a `[[ ]]` conditional expression context.
-    pub const fn leave_cond_expr(&mut self) {
+    pub(crate) const fn leave_cond_expr(&mut self) {
         self.ctx.cond_expr = false;
     }
 
@@ -137,7 +139,7 @@ impl Lexer {
         self.mode = mode;
     }
 
-    pub fn checkpoint(&self) -> LexerCheckpoint {
+    pub(crate) fn checkpoint(&self) -> LexerCheckpoint {
         LexerCheckpoint {
             pos: self.pos,
             line: self.line,
@@ -146,7 +148,7 @@ impl Lexer {
         }
     }
 
-    pub fn restore(&mut self, cp: LexerCheckpoint) {
+    pub(crate) fn restore(&mut self, cp: LexerCheckpoint) {
         self.pos = cp.pos;
         self.line = cp.line;
         self.peeked = cp.peeked;
@@ -155,7 +157,7 @@ impl Lexer {
 }
 
 impl Lexer {
-    pub fn new(source: &str, extglob: bool) -> Self {
+    pub(crate) fn new(source: &str, extglob: bool) -> Self {
         Self {
             input: source.chars().collect::<Vec<_>>().into(),
             pos: 0,
@@ -214,36 +216,36 @@ impl Lexer {
     }
 
     /// Returns the current position.
-    pub const fn pos(&self) -> usize {
+    pub(crate) const fn pos(&self) -> usize {
         self.pos
     }
 
     /// Returns the end position (char index) of the most recently consumed token.
-    pub const fn last_token_end(&self) -> usize {
+    pub(crate) const fn last_token_end(&self) -> usize {
         self.last_token_end
     }
 
     /// Returns the current line number.
-    pub const fn line(&self) -> usize {
+    pub(crate) const fn line(&self) -> usize {
         self.line
     }
 
     /// Returns the total input length.
-    pub fn input_len(&self) -> usize {
+    pub(crate) fn input_len(&self) -> usize {
         self.input.len()
     }
 
     /// Returns the character right after the current position (after peeked token).
     /// Used to detect `((` — the first `(` is peeked as `LeftParen`,
     /// and we check if the next raw character is also `(`.
-    pub fn char_after_peeked(&self) -> Option<char> {
+    pub(crate) fn char_after_peeked(&self) -> Option<char> {
         // The peeked token consumed `(` at self.pos-1 (or wherever)
         // We need to check the char at the current pos
         self.input.get(self.pos).copied()
     }
 
     /// Returns true if at end of input.
-    pub fn at_end(&self) -> bool {
+    pub(crate) fn at_end(&self) -> bool {
         self.pos >= self.input.len()
     }
 
@@ -307,7 +309,7 @@ impl Lexer {
     /// # Errors
     ///
     /// Returns `RableError` on unterminated quotes or unexpected input.
-    pub fn next_token(&mut self) -> Result<Token> {
+    pub(crate) fn next_token(&mut self) -> Result<Token> {
         let tok = if let Some(tok) = self.peeked.take() {
             tok
         } else {
@@ -322,7 +324,7 @@ impl Lexer {
     /// # Errors
     ///
     /// Returns `RableError` on unterminated quotes or unexpected input.
-    pub fn peek_token(&mut self) -> Result<&Token> {
+    pub(crate) fn peek_token(&mut self) -> Result<&Token> {
         if self.peeked.is_none() {
             let tok = self.read_token()?;
             self.peeked = Some(tok);
@@ -411,7 +413,7 @@ impl Lexer {
     /// # Errors
     ///
     /// Returns `RableError` if `))` is not found.
-    pub fn read_until_double_paren(&mut self) -> Result<String> {
+    pub(crate) fn read_until_double_paren(&mut self) -> Result<String> {
         // Clear any peeked token since we're reading raw
         self.peeked = None;
         let mut result = String::new();

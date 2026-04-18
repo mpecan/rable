@@ -1,8 +1,23 @@
+use crate::lexer::word_builder::{QuotingContext, WordSpanKind};
+
 /// Source span representing a byte range in the original input.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
+}
+
+/// Opaque span metadata attached to `Word` and `CondTerm` nodes.
+///
+/// Records where each expansion starts/ends in the raw token text.
+/// External consumers see this type through the variant field but cannot
+/// read or construct it — the fields are crate-private.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WordSpan {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) kind: WordSpanKind,
+    pub(crate) context: QuotingContext,
 }
 
 impl Span {
@@ -75,7 +90,7 @@ pub enum NodeKind {
     Word {
         value: String,
         parts: Vec<Node>,
-        spans: Vec<crate::lexer::word_builder::WordSpan>,
+        spans: Vec<WordSpan>,
     },
 
     /// A literal text segment within a word's parts list.
@@ -344,10 +359,7 @@ pub enum NodeKind {
     CondParen { inner: Box<Node> },
 
     /// A term (word) in a conditional expression.
-    CondTerm {
-        value: String,
-        spans: Vec<crate::lexer::word_builder::WordSpan>,
-    },
+    CondTerm { value: String, spans: Vec<WordSpan> },
 
     // -- Other --
     /// Pipeline negation with `!`.

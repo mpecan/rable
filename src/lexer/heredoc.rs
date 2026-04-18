@@ -4,7 +4,7 @@ use super::Lexer;
 /// `\X` quoting. Returns the normalized delimiter and a flag indicating
 /// whether any quoting was present (bash uses this to decide whether to
 /// expand the body).
-pub fn parse_heredoc_delimiter(raw: &str) -> (String, bool) {
+pub(crate) fn parse_heredoc_delimiter(raw: &str) -> (String, bool) {
     let mut result = String::new();
     let mut quoted = false;
     let mut chars = raw.chars();
@@ -42,11 +42,9 @@ pub fn parse_heredoc_delimiter(raw: &str) -> (String, bool) {
 
 /// Pending here-document to be read after the current line.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct PendingHereDoc {
-    pub delimiter: String,
-    pub strip_tabs: bool,
-    pub quoted: bool,
+pub(crate) struct PendingHereDoc {
+    pub(crate) delimiter: String,
+    pub(crate) strip_tabs: bool,
 }
 
 /// One heredoc body line in normalized form (delimiter-match-ready) plus
@@ -63,11 +61,10 @@ struct ReadLine {
 
 impl Lexer {
     /// Queues a here-document to be read after the next newline.
-    pub fn queue_heredoc(&mut self, delimiter: String, strip_tabs: bool, quoted: bool) {
+    pub(crate) fn queue_heredoc(&mut self, delimiter: String, strip_tabs: bool) {
         self.pending_heredocs.push(PendingHereDoc {
             delimiter,
             strip_tabs,
-            quoted,
         });
     }
 
@@ -231,7 +228,7 @@ impl Lexer {
     }
 
     /// Takes the next completed here-doc content, if any.
-    pub fn take_heredoc_content(&mut self) -> Option<String> {
+    pub(crate) fn take_heredoc_content(&mut self) -> Option<String> {
         if self.heredoc_contents.is_empty() {
             None
         } else {
