@@ -14,6 +14,8 @@ pub(super) mod word_builder;
 mod words;
 
 #[cfg(test)]
+mod backtick_opaque_tests;
+#[cfg(test)]
 mod tests;
 
 pub(crate) use heredoc::PendingHereDoc;

@@ -218,13 +218,8 @@ const KNOWN_ORACLE_FAILURES: &[&str] = &[
     // #37 — reserved words as plain words: cases 1, 3, 4 fixed by #44;
     //   case 5 fixed as a side effect of #35; case 2 fixed by #42
     //   (`((` → nested subshell fallback).
-    // #38 — backticks opaque on invalid content
-    "backtick_opaque 1",
-    "backtick_opaque 2",
-    "backtick_opaque 3",
-    "backtick_opaque 4",
-    "backtick_opaque 5",
-    "backtick_opaque 6",
+    // #38 — backticks opaque on invalid content: all 6 cases fixed via
+    //   `scan_backtick_opaque` fallback in `read_backtick_inner`.
     // #39 — heredoc inside $(...); both cases fixed: case 1 fell out
     //   of #40's `<<'EOF'` fix, case 2 via the sloppy-delimiter path
     //   in `read_heredoc_body` + `reformat_bash` using Cmdsub mode.

@@ -419,12 +419,49 @@ impl Lexer {
     fn read_backtick_inner(&mut self, wb: &mut WordBuilder) -> Result<()> {
         let body_start = self.pos;
         let outer_depth = self.parser_depth();
-        let (end_pos, end_line) = crate::parser::parse_backtick_body(self, outer_depth)?;
+        let (end_pos, end_line) = match crate::parser::parse_backtick_body(self, outer_depth) {
+            Ok(r) => r,
+            Err(_) => self.scan_backtick_opaque(body_start)?,
+        };
         wb.value
             .extend(self.input[body_start..end_pos].iter().copied());
         self.pos = end_pos;
         self.line = end_line;
         Ok(())
+    }
+
+    /// Raw scan for the closing backtick, used as a fallback when
+    /// `parse_backtick_body` rejects the body. Bash treats a backtick
+    /// body as a single word token at the initial lexing stage — errors
+    /// inside are runtime, not parse, concerns. Issue #38.
+    ///
+    /// Only recognizes `\<x>` as a two-byte escape (so an escaped
+    /// `` ` `` does not terminate). Returns `(end_pos, end_line)` with
+    /// `end_pos` one past the closing backtick; errors with
+    /// `MatchedPair` when EOF is reached first.
+    fn scan_backtick_opaque(&self, body_start: usize) -> Result<(usize, usize)> {
+        let mut pos = body_start;
+        let mut line = self.line;
+        while let Some(c) = self.input.get(pos).copied() {
+            match c {
+                '\\' => {
+                    pos += 1;
+                    if let Some(next) = self.input.get(pos).copied() {
+                        if next == '\n' {
+                            line += 1;
+                        }
+                        pos += 1;
+                    }
+                }
+                '`' => return Ok((pos + 1, line)),
+                '\n' => {
+                    line += 1;
+                    pos += 1;
+                }
+                _ => pos += 1,
+            }
+        }
+        Err(RableError::matched_pair("unterminated backtick", pos, line))
     }
 
     /// Reads deprecated `$[...]` arithmetic with bracket depth tracking.
