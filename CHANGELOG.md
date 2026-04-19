@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.2.0](https://github.com/mpecan/rable/compare/rable-v0.1.15...rable-v0.2.0) (2026-04-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* tighten lexer API surface and relocate WordSpan to ast ([#70](https://github.com/mpecan/rable/issues/70))
+
+### Bug Fixes
+
+* **format:** align cmdsub reformatter with bash canonical form ([#49](https://github.com/mpecan/rable/issues/49)) ([c7a4411](https://github.com/mpecan/rable/commit/c7a4411f8628a7a855a550dfe126e070812f108a))
+* **lexer:** accept sloppy heredoc terminator in cmdsub mode ([#50](https://github.com/mpecan/rable/issues/50)) ([40f394f](https://github.com/mpecan/rable/commit/40f394fa8bf7d88286ba74d5a57eaffc50cb6b0d))
+* **lexer:** backticks opaque when content is invalid ([#71](https://github.com/mpecan/rable/issues/71)) ([e72166f](https://github.com/mpecan/rable/commit/e72166ff2ab398e4dba7457255487cb448f9dca3)), closes [#38](https://github.com/mpecan/rable/issues/38)
+* **lexer:** disable reserved-word recognition after assignment words ([#44](https://github.com/mpecan/rable/issues/44)) ([42e1fc0](https://github.com/mpecan/rable/commit/42e1fc0365667cac9f24c4ecc15a980e890bb3d4))
+* **lexer:** stop treating ]] and unbalanced [...] as special outside conditionals ([#45](https://github.com/mpecan/rable/issues/45)) ([4bf5a5c](https://github.com/mpecan/rable/commit/4bf5a5c13fbb08d9ce7ab4b27fec44627a589116))
+* **parser:** fall back from (( … )) arith to nested subshells ([#48](https://github.com/mpecan/rable/issues/48)) ([1437f00](https://github.com/mpecan/rable/commit/1437f00b64d76f372f3851d3d3c044daf8b51c6f))
+
+
+### Code Refactoring
+
+* **format:** introduce Formatter struct ([#65](https://github.com/mpecan/rable/issues/65)) ([d965a8f](https://github.com/mpecan/rable/commit/d965a8fd30a895de43f07075b6aa31c56acfb28c))
+* **lexer:** drop Result&lt;Token&gt; wrapper from operator readers ([#62](https://github.com/mpecan/rable/issues/62)) ([d52a841](https://github.com/mpecan/rable/commit/d52a841a2191357120fbf5953e6a4effb042abcc))
+* **lexer:** split read_word_token into classify + advance + dispatch helpers ([#63](https://github.com/mpecan/rable/issues/63)) ([3ba09f5](https://github.com/mpecan/rable/commit/3ba09f51f9b607baf4bc3d407cc17f439982e27b))
+* **parser:** extract fill_heredoc_contents visitor helpers ([#68](https://github.com/mpecan/rable/issues/68)) ([40e6165](https://github.com/mpecan/rable/commit/40e616504db6e4f20b8e00ecd0da29aa588e0968))
+* **parser:** extract helpers from three oversize parsers ([#69](https://github.com/mpecan/rable/issues/69)) ([25d0762](https://github.com/mpecan/rable/commit/25d076219d2f228b3de0efde74eecc2e110576fb))
+* **sexp:** dispatch NodeKind Display to per-category helpers ([#66](https://github.com/mpecan/rable/issues/66)) ([44b0330](https://github.com/mpecan/rable/commit/44b033050262d8434232cbd210698cde22d656be))
+* **sexp:** table-drive ANSI-C escape dispatch ([#67](https://github.com/mpecan/rable/issues/67)) ([91a5267](https://github.com/mpecan/rable/commit/91a52673cdcc5b499e818dd89a5acfeb00795c11))
+* tighten lexer API surface and relocate WordSpan to ast ([#70](https://github.com/mpecan/rable/issues/70)) ([5171d01](https://github.com/mpecan/rable/commit/5171d0145ec9a545b5ed3a02cc66c9de90d780d8))
+
 ## [0.1.15](https://github.com/mpecan/rable/compare/rable-v0.1.14...rable-v0.1.15) (2026-04-14)
 
 
