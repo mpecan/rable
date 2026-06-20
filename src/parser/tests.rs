@@ -8,6 +8,30 @@ fn parse(source: &str) -> Vec<Node> {
     parser.parse_all().unwrap()
 }
 
+/// Flatten a (possibly nested) `List`/`Pipeline` into its leaf command nodes,
+/// in source order. Test helper for span-boundary assertions.
+fn collect_leaf_commands<'a>(node: &'a Node, out: &mut Vec<&'a Node>) {
+    match &node.kind {
+        NodeKind::List { items } => {
+            for item in items {
+                collect_leaf_commands(&item.command, out);
+            }
+        }
+        NodeKind::Pipeline { commands, .. } => {
+            for cmd in commands {
+                collect_leaf_commands(cmd, out);
+            }
+        }
+        _ => out.push(node),
+    }
+}
+
+/// Slice `source` by **character** offsets, mirroring how `Node::source_text`
+/// resolves spans. Test helper for asserting inter-span gaps.
+fn char_slice(source: &str, start: usize, end: usize) -> String {
+    source.chars().skip(start).take(end - start).collect()
+}
+
 #[test]
 fn simple_command() {
     let nodes = parse("echo hello");
@@ -399,6 +423,67 @@ fn source_text_multibyte_utf8() {
     };
     assert_eq!(words[0].source_text(source), "echo");
     assert_eq!(words[1].source_text(source), "café");
+}
+
+#[test]
+fn source_text_multibyte_non_last_word() {
+    // Regression (tokf #383): a multibyte word that is NOT the last token.
+    // Before the char-count span fix, the word's span end was computed as
+    // `pos + byte_len`, overshooting into the following token — here `café`
+    // would bleed into ` bar`. The previous `source_text_multibyte_utf8`
+    // test missed this because its multibyte word was last, so the
+    // overshooting span clamped harmlessly to the source end.
+    let source = "echo café bar";
+    let nodes = parse(source);
+    assert_eq!(nodes[0].source_text(source), "echo café bar");
+    let NodeKind::Command { words, .. } = &nodes[0].kind else {
+        unreachable!("expected Command");
+    };
+    assert_eq!(words[0].source_text(source), "echo");
+    assert_eq!(words[1].source_text(source), "café");
+    assert_eq!(words[2].source_text(source), "bar");
+}
+
+#[test]
+fn source_text_multibyte_compound_segments() {
+    // Regression (tokf #383): multibyte in non-final segments of a compound
+    // list. Each leaf command's source_text must be exact, and the spans
+    // must leave the operator gaps intact for a consumer that slices
+    // `source[prev.span.end .. next.span.start]` as the separator.
+    let source = "echo \"✓ ok\" || echo \"✗ no\"; ls";
+    let nodes = parse(source);
+    let mut leaves = Vec::new();
+    collect_leaf_commands(&nodes[0], &mut leaves);
+    let texts: Vec<&str> = leaves.iter().map(|n| n.source_text(source)).collect();
+    assert_eq!(texts, vec!["echo \"✓ ok\"", "echo \"✗ no\"", "ls"]);
+    // The gap between the first two leaves must be exactly the `||` operator
+    // (converting the character spans to byte offsets, as source_text does).
+    let gap = char_slice(source, leaves[0].span.end, leaves[1].span.start);
+    assert_eq!(gap, " || ");
+}
+
+#[test]
+fn source_text_multibyte_pipeline() {
+    // Regression (tokf #383): multibyte in the left command of a pipeline.
+    let source = "echo \"✓\" | grep x";
+    let nodes = parse(source);
+    let NodeKind::Pipeline { commands, .. } = &nodes[0].kind else {
+        unreachable!("expected Pipeline");
+    };
+    assert_eq!(commands[0].source_text(source), "echo \"✓\"");
+    assert_eq!(commands[1].source_text(source), "grep x");
+}
+
+#[test]
+fn source_text_astral_plane_emoji() {
+    // Regression (tokf #383): a 4-byte (astral-plane) char before a newline
+    // separator. Previously `echo 🎉` overshot its span and the second
+    // command's slice underflowed, panicking on a non-char-boundary index.
+    let source = "echo 🎉\nls";
+    let nodes = parse(source);
+    assert_eq!(nodes.len(), 2);
+    assert_eq!(nodes[0].source_text(source), "echo 🎉");
+    assert_eq!(nodes[1].source_text(source), "ls");
 }
 
 #[test]

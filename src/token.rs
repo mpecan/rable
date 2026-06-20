@@ -183,8 +183,12 @@ impl Token {
     }
 
     /// Returns true if this token is immediately adjacent to `other` (no whitespace).
-    pub const fn adjacent_to(&self, other: &Self) -> bool {
-        self.pos + self.value.len() == other.pos
+    ///
+    /// `pos` is a character index, so adjacency is measured in characters: the
+    /// token's char count, not its byte length (which diverges for multibyte
+    /// UTF-8 — tokf #383).
+    pub fn adjacent_to(&self, other: &Self) -> bool {
+        self.pos + self.value.chars().count() == other.pos
     }
 
     pub const fn eof(pos: usize, line: usize) -> Self {

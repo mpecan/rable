@@ -317,7 +317,11 @@ impl Lexer {
         } else {
             self.read_token()?
         };
-        self.last_token_end = tok.pos + tok.value.len();
+        // `pos` is a character index (the lexer scans a `Vec<char>`), so the
+        // span end must advance by the token's character count, not its byte
+        // length. Using `value.len()` (bytes) corrupts spans for any token
+        // containing multibyte UTF-8 (tokf #383).
+        self.last_token_end = tok.pos + tok.value.chars().count();
         Ok(tok)
     }
 

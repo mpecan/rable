@@ -19,7 +19,8 @@ impl Parser {
                 value: word_tok.value.clone(),
                 spans: word_tok.spans,
             },
-            Span::new(word_tok.pos, word_tok.pos + word_tok.value.len()),
+            // Char count, not byte length: `pos` is a character index (#383).
+            Span::new(word_tok.pos, word_tok.pos + word_tok.value.chars().count()),
         ));
 
         self.lexer.set_command_start();

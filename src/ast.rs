@@ -1,6 +1,11 @@
 use crate::lexer::word_builder::{QuotingContext, WordSpanKind};
 
-/// Source span representing a byte range in the original input.
+/// Source span representing a **character** range in the original input.
+///
+/// Offsets are character indices (the lexer scans the source as a `Vec<char>`),
+/// not byte offsets — they diverge for multibyte UTF-8. Use
+/// [`Node::source_text`] to recover the source slice; it converts these
+/// character indices to byte offsets before slicing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Span {
     pub start: usize,
