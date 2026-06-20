@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/mpecan/rable/compare/rable-v0.2.0...rable-v0.2.1) (2026-06-20)
+
+
+### Bug Fixes
+
+* **lexer:** compute span ends by character count, not byte length ([#72](https://github.com/mpecan/rable/issues/72)) ([58b2e50](https://github.com/mpecan/rable/commit/58b2e50c6f421b83fee04d899ca82b50f7949b43))
+
 ## [0.2.0](https://github.com/mpecan/rable/compare/rable-v0.1.15...rable-v0.2.0) (2026-04-18)
 
 
