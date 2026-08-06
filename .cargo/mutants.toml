@@ -1,0 +1,16 @@
+# cargo-mutants configuration — https://mutants.rs/
+#
+# Mutation testing complements the Parable/oracle corpora: it injects small
+# changes into the lexer/parser and checks that some test notices. A "missed"
+# mutant marks behaviour nothing asserts on.
+
+# `src/python.rs` is behind the `python` feature, which needs PyO3's
+# `extension-module` linkage. It is not part of the default test build, so its
+# mutants can never be caught — exclude them instead of reporting them unviable.
+exclude_globs = ["src/python.rs"]
+
+# The suite finishes in seconds, so the auto-derived timeout would be tiny.
+# Runaway loops in the lexer are a genuine mutation outcome; give them room to
+# be detected as timeouts rather than flaking healthy mutants.
+minimum_test_timeout = 30
+timeout_multiplier = 5.0
