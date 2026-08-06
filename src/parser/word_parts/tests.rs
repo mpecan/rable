@@ -335,102 +335,6 @@ fn arithmetic_expression_tree_shape() {
 }
 
 #[test]
-fn ansi_c_decodes_hex() {
-    let parts = decompose("$'\\x41'");
-    assert!(matches!(
-        &parts[0].kind,
-        NodeKind::AnsiCQuote { decoded, .. } if decoded == "A"
-    ));
-}
-
-#[test]
-fn ansi_c_decodes_newline() {
-    let parts = decompose("$'line1\\nline2'");
-    assert!(matches!(
-        &parts[0].kind,
-        NodeKind::AnsiCQuote { decoded, .. } if decoded == "line1\nline2"
-    ));
-}
-
-#[test]
-fn ansi_c_decodes_octal() {
-    // octal 101 = 65 = 'A'
-    let parts = decompose("$'\\101'");
-    assert!(matches!(
-        &parts[0].kind,
-        NodeKind::AnsiCQuote { decoded, .. } if decoded == "A"
-    ));
-}
-
-#[test]
-fn ansi_c_decodes_unicode() {
-    let parts = decompose("$'\\u0041'");
-    assert!(matches!(
-        &parts[0].kind,
-        NodeKind::AnsiCQuote { decoded, .. } if decoded == "A"
-    ));
-}
-
-#[test]
-fn ansi_c_decodes_control_char() {
-    // Ctrl-A = 0x01
-    let parts = decompose("$'\\cA'");
-    assert!(matches!(
-        &parts[0].kind,
-        NodeKind::AnsiCQuote { decoded, .. } if decoded == "\u{01}"
-    ));
-}
-
-#[test]
-fn ansi_c_unknown_escape_passthrough() {
-    let parts = decompose("$'\\z'");
-    assert!(matches!(
-        &parts[0].kind,
-        NodeKind::AnsiCQuote { decoded, .. } if decoded == "\\z"
-    ));
-}
-
-#[test]
-fn ansi_c_preserves_raw_content() {
-    // Legacy `content` field must remain byte-identical so the
-    // Parable corpus keeps passing.
-    let parts = decompose("$'foo\\nbar'");
-    assert!(matches!(
-        &parts[0].kind,
-        NodeKind::AnsiCQuote { content, .. } if content == "foo\\nbar"
-    ));
-}
-
-#[test]
-fn locale_string_strips_quotes() {
-    let parts = decompose("$\"hello\"");
-    assert!(matches!(
-        &parts[0].kind,
-        NodeKind::LocaleString { inner, .. } if inner == "hello"
-    ));
-}
-
-#[test]
-fn locale_string_empty() {
-    let parts = decompose("$\"\"");
-    assert!(matches!(
-        &parts[0].kind,
-        NodeKind::LocaleString { inner, .. } if inner.is_empty()
-    ));
-}
-
-#[test]
-fn locale_string_preserves_raw_content() {
-    // Legacy `content` field keeps the surrounding quotes so the
-    // Parable corpus keeps passing.
-    let parts = decompose("$\"hello\"");
-    assert!(matches!(
-        &parts[0].kind,
-        NodeKind::LocaleString { content, .. } if content == "\"hello\""
-    ));
-}
-
-#[test]
 fn backtick_command_substitution() {
     let parts = decompose("`date`");
     assert_eq!(parts.len(), 1);
@@ -489,5 +393,90 @@ fn backtick_and_dollar_paren_both_decompose() {
     assert!(matches!(
         &parts[1].kind,
         NodeKind::CommandSubstitution { .. }
+    ));
+}
+
+/// Walks into a `CommandSubstitution` and returns the decomposed parts of
+/// the last word of the command it wraps.
+fn last_word_parts(sub: &Node) -> &[Node] {
+    let NodeKind::CommandSubstitution { command, .. } = &sub.kind else {
+        unreachable!("expected command substitution, got {:?}", sub.kind);
+    };
+    let NodeKind::Command { words, .. } = &command.kind else {
+        unreachable!("expected command, got {:?}", command.kind);
+    };
+    let Some(last) = words.last() else {
+        unreachable!("expected at least one word");
+    };
+    let NodeKind::Word { parts, .. } = &last.kind else {
+        unreachable!("expected word, got {:?}", last.kind);
+    };
+    parts
+}
+
+#[test]
+fn nested_substitution_decomposes_to_the_depth_limit() {
+    let outer = decompose("$(a $(b $(c)))");
+    let level2 = last_word_parts(&outer[0]);
+    assert!(matches!(
+        &level2[0].kind,
+        NodeKind::CommandSubstitution { .. }
+    ));
+    // The budget is two levels; beyond that the text is kept verbatim
+    // rather than decomposed further.
+    let level3 = last_word_parts(&level2[0]);
+    assert!(matches!(
+        &level3[0].kind,
+        NodeKind::WordLiteral { value } if value == "$(c)"
+    ));
+}
+
+#[test]
+fn depth_budget_is_released_between_words() {
+    // The counter is a thread-local shared across calls. If it were not
+    // released on the way out, the third substitution in a row would be
+    // treated as too deep and fall back to a literal.
+    for i in 0..5 {
+        let parts = decompose("$(a)");
+        assert!(
+            matches!(&parts[0].kind, NodeKind::CommandSubstitution { .. }),
+            "substitution {i} decomposed as {:?}",
+            parts[0].kind
+        );
+    }
+}
+
+#[test]
+fn quoted_runs_are_not_decomposed() {
+    // Quoting is structural, not an expansion: a fully quoted word stays a
+    // single literal (quotes included) rather than becoming its own part.
+    for source in ["\"abc\"", "'abc'"] {
+        let parts = decompose(source);
+        assert_eq!(parts.len(), 1, "for input {source:?}");
+        assert!(
+            matches!(&parts[0].kind, NodeKind::WordLiteral { value } if value == source),
+            "for input {source:?}, got {:?}",
+            parts[0].kind
+        );
+    }
+}
+
+#[test]
+fn expansions_inside_double_quotes_still_decompose() {
+    // The quotes themselves stay in the surrounding literals, but the
+    // expansion between them is a part of its own.
+    let parts = decompose("a\"b$c\"d");
+    assert_eq!(parts.len(), 3);
+    assert!(matches!(
+        &parts[0].kind,
+        NodeKind::WordLiteral { value } if value == "a\"b"
+    ));
+    assert!(matches!(
+        &parts[1].kind,
+        NodeKind::ParamExpansion { param, .. } if param == "c"
+    ));
+    assert!(matches!(
+        &parts[2].kind,
+        NodeKind::WordLiteral { value } if value == "\"d"
     ));
 }

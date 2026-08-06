@@ -14,6 +14,43 @@ fn parse_err(source: &str) {
     );
 }
 
+/// Asserts the failure message, not just that a failure happened — several
+/// distinct rejection paths would otherwise be interchangeable.
+#[allow(clippy::expect_used)]
+fn parse_err_msg(source: &str, expected: &str) {
+    let Err(err) = parse_arith_expression(source) else {
+        unreachable!("expected error for {source:?}");
+    };
+    assert_eq!(err.message(), expected, "for input {source:?}");
+}
+
+/// Extracts the operator of a binary node, panicking with context otherwise.
+fn binop_of(source: &str) -> String {
+    let n = parse(source);
+    let NodeKind::ArithBinaryOp { op, .. } = &n.kind else {
+        unreachable!("expected binop for {source:?}, got {:?}", n.kind);
+    };
+    op.clone()
+}
+
+/// Extracts the operator of a unary node.
+fn unop_of(source: &str) -> String {
+    let n = parse(source);
+    let NodeKind::ArithUnaryOp { op, .. } = &n.kind else {
+        unreachable!("expected unary for {source:?}, got {:?}", n.kind);
+    };
+    op.clone()
+}
+
+/// Extracts the operator of an assignment node.
+fn assign_of(source: &str) -> String {
+    let n = parse(source);
+    let NodeKind::ArithAssign { op, .. } = &n.kind else {
+        unreachable!("expected assign for {source:?}, got {:?}", n.kind);
+    };
+    op.clone()
+}
+
 #[test]
 fn empty_expression() {
     assert!(matches!(parse("").kind, NodeKind::ArithEmpty));
@@ -294,4 +331,127 @@ fn error_on_extreme_paren_nesting() {
     // Guard against stack overflow on pathological input.
     let input = format!("{}1{}", "(".repeat(100), ")".repeat(100));
     parse_err(&input);
+}
+
+// --- operator table coverage ----------------------------------------------
+//
+// Every operator the tokenizer and parser claim to support gets an assertion
+// on the resulting node's operator string. Without these, whole arms of
+// `match_one` / `match_two` / `match_three` / `assign_op` can be deleted
+// without any test noticing.
+
+#[test]
+fn multiplicative_operators() {
+    for (src, expected) in [("a * b", "*"), ("a / b", "/"), ("a % b", "%")] {
+        assert_eq!(binop_of(src), expected, "for input {src:?}");
+    }
+}
+
+#[test]
+fn unary_operators() {
+    for (src, expected) in [("-x", "-"), ("+x", "+"), ("!x", "!"), ("~x", "~")] {
+        assert_eq!(unop_of(src), expected, "for input {src:?}");
+    }
+}
+
+#[test]
+fn all_compound_assignments() {
+    for (src, expected) in [
+        ("x = 5", "="),
+        ("x += 5", "+="),
+        ("x -= 5", "-="),
+        ("x *= 5", "*="),
+        ("x /= 5", "/="),
+        ("x %= 5", "%="),
+        ("x &= 5", "&="),
+        ("x ^= 5", "^="),
+        ("x |= 5", "|="),
+    ] {
+        assert_eq!(assign_of(src), expected, "for input {src:?}");
+    }
+}
+
+#[test]
+fn shift_assignments_without_surrounding_space() {
+    // Deliberately unspaced: `match_three` consumes three bytes and the
+    // resume offset must be `start + 3`. With spaces around the operator a
+    // wrong offset can still land on the next token by luck.
+    assert_eq!(assign_of("a<<=2"), "<<=");
+    assert_eq!(assign_of("a>>=2"), ">>=");
+}
+
+// --- number tokenization --------------------------------------------------
+
+#[test]
+fn uppercase_hex_number() {
+    let n = parse("0XFF");
+    assert!(matches!(&n.kind, NodeKind::ArithNumber { value } if value == "0XFF"));
+}
+
+#[test]
+fn digit_followed_by_letters_is_not_one_token() {
+    // `1x` is a number then an identifier — two tokens, hence trailing input.
+    // `0abc` must not be mistaken for a hex literal: only `0x`/`0X` starts one.
+    parse_err("1x");
+    parse_err("0abc");
+}
+
+#[test]
+fn base_n_digits_include_underscore_and_at() {
+    // bash uses `_` and `@` as base-N digits 62 and 63.
+    for src in ["64#a_b", "64#a@b"] {
+        let n = parse(src);
+        assert!(
+            matches!(&n.kind, NodeKind::ArithNumber { value } if value == src),
+            "for input {src:?}, got {:?}",
+            n.kind
+        );
+    }
+}
+
+#[test]
+fn base_n_literal_stops_at_operator() {
+    // A base-N literal must not swallow the following operator.
+    assert_eq!(binop_of("64#abc+1"), "+");
+}
+
+#[test]
+fn error_on_dollar_followed_by_digit() {
+    // `$1` is a positional parameter; this lightweight parser rejects it so
+    // the caller can fall back to an undecomposed expression.
+    parse_err("$1");
+}
+
+// --- error identity -------------------------------------------------------
+
+#[test]
+fn error_messages_distinguish_failure_modes() {
+    parse_err_msg("1 +", "unexpected end of arithmetic expression");
+    parse_err_msg("1 2", "trailing tokens in arithmetic expression");
+    parse_err_msg("(1 + 2", "expected ')' in arithmetic expression");
+    parse_err_msg("a[1", "expected ']' in array subscript");
+    parse_err_msg("a $", "trailing '$' in arithmetic expression");
+    parse_err_msg("@", "unexpected character '@' in arithmetic expression");
+}
+
+#[test]
+fn error_carries_position_and_line() {
+    #[allow(clippy::expect_used)]
+    let err = parse_arith_expression("1 2").expect_err("expected error");
+    // The arithmetic subparser works on an already-extracted substring, so
+    // it reports position 0 / line 1 and lets the caller attach real spans.
+    assert_eq!(err.pos(), 0);
+    assert_eq!(err.line(), 1);
+}
+
+// --- depth accounting -----------------------------------------------------
+
+#[test]
+fn sequential_groups_do_not_accumulate_depth() {
+    // `parse_expression` is re-entered once per parenthesized group. Depth
+    // must unwind on the way out, otherwise a long *flat* chain of groups
+    // would trip `MAX_ARITH_DEPTH` even though nesting never exceeds two.
+    let src = vec!["(1)"; super::MAX_ARITH_DEPTH + 8].join("+");
+    let n = parse(&src);
+    assert!(matches!(&n.kind, NodeKind::ArithBinaryOp { op, .. } if op == "+"));
 }
