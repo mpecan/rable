@@ -3,6 +3,7 @@
 
 use crate::ast::{ListItem, ListOperator, Node, NodeKind, PipeSep, Span};
 use crate::error::{RableError, Result};
+use crate::lexer::LexerMode;
 use crate::token::TokenType;
 
 use super::Parser;
@@ -58,6 +59,13 @@ impl Parser {
                 break;
             }
             self.lexer.next_token()?;
+            // `ls;\necho` is two top-level nodes, like `ls\necho`: a newline
+            // after `;` ends the node and is left for `parse_all`. The
+            // `$(...)` reformatter re-parses bodies in `Cmdsub` mode, where
+            // `a;\nb` must stay one list so it is rendered as `a; b`.
+            if self.lexer.mode() == LexerMode::Normal && self.peek_is(TokenType::Newline)? {
+                break;
+            }
             self.skip_newlines()?;
             if self.at_end()? || self.is_list_terminator()? {
                 break;
@@ -131,11 +139,12 @@ impl Parser {
                 break;
             }
             self.lexer.next_token()?;
+            let amp_end = self.lexer.last_token_end();
             if !top_level {
                 self.skip_newlines()?;
             }
             if self.at_end()? || self.is_list_terminator()? {
-                left = make_trailing(left, ListOperator::Background, self.lexer.pos());
+                left = make_trailing(left, ListOperator::Background, amp_end);
                 break;
             }
             // At top level a raw newline after `&` ends the current node;
@@ -143,7 +152,7 @@ impl Parser {
             // a Semi is left as a "trailing" marker. Matching both is harmless.
             let peek_kind = self.lexer.peek_token()?.kind;
             if matches!(peek_kind, TokenType::Semi | TokenType::Newline) {
-                left = make_trailing(left, ListOperator::Background, self.lexer.pos());
+                left = make_trailing(left, ListOperator::Background, amp_end);
                 break;
             }
             let right = self.parse_and_or()?;

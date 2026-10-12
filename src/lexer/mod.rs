@@ -144,6 +144,11 @@ impl Lexer {
         self.mode = mode;
     }
 
+    /// Returns which nested construct this lexer is parsing, if any.
+    pub(crate) const fn mode(&self) -> LexerMode {
+        self.mode
+    }
+
     pub(crate) fn checkpoint(&self) -> LexerCheckpoint {
         LexerCheckpoint {
             pos: self.pos,
