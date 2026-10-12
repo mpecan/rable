@@ -5,6 +5,7 @@ use std::rc::Rc;
 use crate::error::{RableError, Result};
 use crate::token::{Token, TokenType};
 
+mod backtick;
 mod brace_expansion;
 mod expansions;
 pub(crate) mod heredoc;

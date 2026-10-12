@@ -1,4 +1,6 @@
-//! Expansions inside double quotes: `$'` is literal there (#75).
+//! Expansions inside double quotes: `$'` is literal there (#75), and a
+//! backtick substitution is exposed as a `CommandSubstitution` part just
+//! like `$(…)` (#76).
 
 use crate::ast::{Node, NodeKind};
 
@@ -23,6 +25,17 @@ fn word_parts(source: &str, index: usize) -> Vec<Node> {
         unreachable!("expected Word");
     };
     parts.clone()
+}
+
+/// Returns the S-expression of each `CommandSubstitution` part's command.
+fn cmdsub_commands(parts: &[Node]) -> Vec<String> {
+    parts
+        .iter()
+        .filter_map(|p| match &p.kind {
+            NodeKind::CommandSubstitution { command, .. } => Some(command.to_string()),
+            _ => None,
+        })
+        .collect()
 }
 
 // -- `$'` inside double quotes (#75) -----------------------------------------
@@ -69,5 +82,45 @@ fn ansi_c_quote_in_param_default_inside_double_quotes() {
     assert_eq!(
         parse_sexp(r#"echo "${x:-$'a'}""#),
         r#"(command (word "echo") (word "\"${x:-a}\""))"#
+    );
+}
+
+// -- backticks inside double quotes (#76) ------------------------------------
+
+#[test]
+fn backtick_in_double_quotes_is_command_substitution() {
+    let parts = word_parts(r#"echo "`rm -rf x`""#, 1);
+    assert_eq!(parts.len(), 3);
+    assert!(matches!(&parts[0].kind, NodeKind::WordLiteral { value } if value == "\""));
+    assert_eq!(
+        cmdsub_commands(&parts),
+        vec![r#"(command (word "rm") (word "-rf") (word "x"))"#]
+    );
+    assert!(matches!(&parts[2].kind, NodeKind::WordLiteral { value } if value == "\""));
+}
+
+#[test]
+fn backtick_and_dollar_paren_in_double_quotes_match() {
+    let backtick = word_parts(r#"echo "a `ls` b""#, 1);
+    let dollar = word_parts(r#"echo "a $(ls) b""#, 1);
+    assert_eq!(cmdsub_commands(&backtick), cmdsub_commands(&dollar));
+    assert_eq!(backtick.len(), dollar.len());
+}
+
+#[test]
+fn multiple_backticks_in_double_quotes() {
+    let parts = word_parts(r#"echo "`a`-`b`""#, 1);
+    assert_eq!(
+        cmdsub_commands(&parts),
+        vec![r#"(command (word "a"))"#, r#"(command (word "b"))"#]
+    );
+}
+
+#[test]
+fn backtick_in_double_quotes_sexp_unchanged() {
+    // The S-expression keeps the backtick text verbatim (Parable parity).
+    assert_eq!(
+        parse_sexp(r#"echo "`rm -rf x`""#),
+        r#"(command (word "echo") (word "\"`rm -rf x`\""))"#
     );
 }

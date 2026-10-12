@@ -98,9 +98,7 @@ impl Lexer {
                     }
                 }
                 Some('`') => {
-                    self.advance_char();
-                    wb.push('`');
-                    self.read_backtick(wb)?;
+                    self.read_backtick_sub(wb)?;
                 }
                 Some(c) => {
                     self.advance_char();

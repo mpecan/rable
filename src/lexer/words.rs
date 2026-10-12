@@ -223,11 +223,7 @@ impl Lexer {
                 self.read_dollar(wb)?;
             }
             '`' => {
-                let start = wb.span_start();
-                self.advance_char();
-                wb.push('`');
-                self.read_backtick(wb)?;
-                wb.record(start, WordSpanKind::Backtick);
+                self.read_backtick_sub(wb)?;
             }
             _ => {}
         }
