@@ -16,6 +16,8 @@ mod words;
 #[cfg(test)]
 mod backtick_opaque_tests;
 #[cfg(test)]
+mod double_quote_tests;
+#[cfg(test)]
 mod tests;
 
 pub(crate) use heredoc::PendingHereDoc;
