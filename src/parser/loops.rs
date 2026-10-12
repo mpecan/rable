@@ -57,7 +57,7 @@ impl Parser {
         self.expect(TokenType::For)?;
 
         if self.peek_is(TokenType::LeftParen)? {
-            return self.parse_for_arith();
+            return self.parse_for_arith(start);
         }
 
         let var_tok = self.lexer.next_token()?;
@@ -90,8 +90,7 @@ impl Parser {
         ))
     }
 
-    fn parse_for_arith(&mut self) -> Result<Node> {
-        let start = self.peek_pos()?;
+    fn parse_for_arith(&mut self, start: usize) -> Result<Node> {
         self.expect(TokenType::LeftParen)?;
         self.expect(TokenType::LeftParen)?;
 

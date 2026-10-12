@@ -433,6 +433,7 @@ impl Lexer {
                     self.advance_char();
                     if self.peek_char() == Some(')') {
                         self.advance_char();
+                        self.last_token_end = self.pos;
                         return Ok(result);
                     }
                     result.push(')');
