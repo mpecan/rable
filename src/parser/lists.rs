@@ -2,7 +2,7 @@
 //! and/or (`&&`/`||`), and pipelines (`|`/`|&`, plus `!` and `time`).
 
 use crate::ast::{ListItem, ListOperator, Node, NodeKind, PipeSep, Span};
-use crate::error::Result;
+use crate::error::{RableError, Result};
 use crate::token::TokenType;
 
 use super::Parser;
@@ -181,7 +181,16 @@ impl Parser {
         Ok(left)
     }
 
+    /// Parses a pipeline that must contain a command. An empty command is a
+    /// syntax error here (`ls && && x`, `; x`); only `!` and `time` may
+    /// stand alone, which `parse_pipeline_or_empty` allows.
     fn parse_pipeline(&mut self) -> Result<Node> {
+        let node = self.parse_pipeline_or_empty()?;
+        self.ensure_command(Some(&node))?;
+        Ok(node)
+    }
+
+    fn parse_pipeline_or_empty(&mut self) -> Result<Node> {
         let start = self.peek_pos()?;
         if self.lexer.peek_token()?.kind == TokenType::Bang {
             self.lexer.next_token()?;
@@ -189,7 +198,7 @@ impl Parser {
                 self.lexer.next_token()?;
                 return self.parse_pipeline_inner();
             }
-            let inner = self.parse_pipeline()?;
+            let inner = self.parse_pipeline_or_empty()?;
             return Ok(self.spanned(
                 start,
                 NodeKind::Negation {
@@ -243,8 +252,12 @@ impl Parser {
             if self.at_end()? {
                 break;
             }
-            let tok = self.lexer.peek_token()?;
-            match tok.kind {
+            let kind = self.lexer.peek_token()?.kind;
+            if matches!(kind, TokenType::Pipe | TokenType::PipeBoth) {
+                // `| x` / `ls | | x`: the command before the pipe is missing.
+                self.ensure_command(commands.last())?;
+            }
+            match kind {
                 TokenType::Pipe => {
                     self.lexer.next_token()?;
                     self.skip_newlines()?;
@@ -267,6 +280,8 @@ impl Parser {
         if commands.len() == 1 {
             Ok(commands.remove(0))
         } else {
+            // `ls |`: the command after the last pipe is missing.
+            self.ensure_command(commands.last())?;
             let span = Span::new(
                 commands.first().map_or(0, |c| c.span.start),
                 commands.last().map_or(0, |c| c.span.end),
@@ -279,6 +294,21 @@ impl Parser {
                 span,
             ))
         }
+    }
+
+    /// Reports an empty command as a syntax error at the token that should
+    /// have started it. Non-empty (or absent) nodes pass through.
+    fn ensure_command(&mut self, node: Option<&Node>) -> Result<()> {
+        if !node.is_some_and(|n| matches!(n.kind, NodeKind::Empty)) {
+            return Ok(());
+        }
+        let tok = self.lexer.peek_token()?;
+        let message = if tok.kind == TokenType::Eof {
+            "syntax error: unexpected end of input".to_string()
+        } else {
+            format!("syntax error near unexpected token '{}'", tok.value)
+        };
+        Err(RableError::parse(message, tok.pos, tok.line))
     }
 
     fn check_word(&mut self, expected: &str) -> Result<bool> {
