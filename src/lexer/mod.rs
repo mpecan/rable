@@ -5,6 +5,7 @@ use std::rc::Rc;
 use crate::error::{RableError, Result};
 use crate::token::{Token, TokenType};
 
+mod backtick;
 mod brace_expansion;
 mod expansions;
 pub(crate) mod heredoc;
@@ -15,6 +16,8 @@ mod words;
 
 #[cfg(test)]
 mod backtick_opaque_tests;
+#[cfg(test)]
+mod double_quote_tests;
 #[cfg(test)]
 mod tests;
 
@@ -139,6 +142,11 @@ impl Lexer {
     /// heredoc-terminator rules that the original fork used.
     pub(crate) const fn set_mode(&mut self, mode: LexerMode) {
         self.mode = mode;
+    }
+
+    /// Returns which nested construct this lexer is parsing, if any.
+    pub(crate) const fn mode(&self) -> LexerMode {
+        self.mode
     }
 
     pub(crate) fn checkpoint(&self) -> LexerCheckpoint {
@@ -430,6 +438,7 @@ impl Lexer {
                     self.advance_char();
                     if self.peek_char() == Some(')') {
                         self.advance_char();
+                        self.last_token_end = self.pos;
                         return Ok(result);
                     }
                     result.push(')');

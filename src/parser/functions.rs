@@ -6,6 +6,7 @@ use crate::error::Result;
 use crate::token::{Token, TokenType};
 
 use super::Parser;
+use super::arithmetic::parse_arith_expression;
 use super::helpers::{is_fd_number, is_redirect_op_kind, word_node_from_token};
 
 impl Parser {
@@ -91,7 +92,7 @@ impl Parser {
     }
 
     pub(super) fn parse_function_def(&mut self, name_tok: &Token) -> Result<Node> {
-        let start = self.peek_pos()?;
+        let start = name_tok.pos;
         self.expect(TokenType::LeftParen)?;
         self.expect(TokenType::RightParen)?;
         self.lexer.set_command_start();
@@ -215,10 +216,11 @@ impl Parser {
         self.expect(TokenType::LeftParen)?;
         let content = self.lexer.read_until_double_paren()?;
         let redirects = self.parse_trailing_redirects()?;
+        let expression = parse_arith_expression(&content).ok().map(Box::new);
         Ok(self.spanned(
             start,
             NodeKind::ArithmeticCommand {
-                expression: None,
+                expression,
                 redirects,
                 raw_content: content,
             },

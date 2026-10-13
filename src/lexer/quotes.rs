@@ -87,9 +87,10 @@ impl Lexer {
                     }
                 }
                 Some('$') => {
-                    // Inside double quotes, $" is NOT a locale string — it's
-                    // bare $ followed by closing ". Don't let read_dollar consume it.
-                    if self.input.get(self.pos + 1) == Some(&'"') {
+                    // Inside double quotes, $" is NOT a locale string and $' is
+                    // NOT ANSI-C quoting — both are a bare $ followed by a quote
+                    // character. Don't let read_dollar consume them.
+                    if matches!(self.input.get(self.pos + 1), Some('"' | '\'')) {
                         self.advance_char();
                         wb.push('$');
                     } else {
@@ -97,9 +98,7 @@ impl Lexer {
                     }
                 }
                 Some('`') => {
-                    self.advance_char();
-                    wb.push('`');
-                    self.read_backtick(wb)?;
+                    self.read_backtick_sub(wb)?;
                 }
                 Some(c) => {
                     self.advance_char();

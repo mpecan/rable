@@ -31,6 +31,7 @@
 | `src/lexer/words.rs` | Word boundary detection |
 | `src/lexer/word_builder.rs` | Word assembly with segments |
 | `src/lexer/expansions.rs` | Parameter, command, arithmetic expansion parsing |
+| `src/lexer/backtick.rs` | Backtick command substitution (forked parse, opaque fallback) |
 | `src/lexer/operators.rs` | Operator recognition |
 | `src/parser/` | Recursive descent parser (top-level) |
 | `src/parser/compound.rs` | Compound commands: if/while/for/case/select/coproc |

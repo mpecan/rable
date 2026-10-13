@@ -123,12 +123,7 @@ impl Parser {
     /// consume the redirect and return it. Otherwise return `Ok(None)` so
     /// the caller treats `tok` as a regular word/assignment.
     fn try_parse_fd_redirect(&mut self, tok: &Token) -> Result<Option<Node>> {
-        let adjacent = self
-            .lexer
-            .peek_token()
-            .map(|next| tok.adjacent_to(next))
-            .unwrap_or(false);
-        if !adjacent {
+        if !tok.adjacent_to(self.lexer.peek_token()?) {
             return Ok(None);
         }
         if is_fd_number(&tok.value) && self.is_redirect_operator()? && !self.is_and_redirect()? {
