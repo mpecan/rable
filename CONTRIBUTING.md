@@ -150,6 +150,41 @@ just fuzz-generate-tests      # regenerate oracle test files (requires bash-orac
 just test-oracle              # run oracle test suite
 ```
 
+## Mutation Testing
+
+The Parable and oracle corpora prove Rable produces the right S-expressions;
+mutation testing proves the tests would *notice* if it stopped. `cargo-mutants`
+injects small changes into the lexer and parser and checks that some test fails.
+A "missed" mutant marks behaviour nothing asserts on.
+
+```bash
+just install-mutants          # one-time: cargo install cargo-mutants
+just mutants-diff             # only the lines you changed, vs main  ← run this
+just mutants-diff origin/main # vs the pushed base
+```
+
+**`just mutants-diff` is the one to run before opening a PR.** It takes seconds
+to minutes instead of half an hour, covers committed and uncommitted work alike,
+and exits non-zero if any mutant in your changed lines survives. Set
+`CARGO_MUTANTS_JOBS=8` to parallelize.
+
+When something survives, the fix is usually a missing assertion rather than
+missing code — check whether the mutated line has behaviour no test pins down.
+Some survivors are genuinely equivalent mutants (a bounds check that can't be
+reached, an accessor only the public API uses); say so in the PR rather than
+contorting a test around them.
+
+The slower whole-crate forms:
+
+```bash
+just mutants                          # all ~1700 mutants (~30 min)
+just mutants-file src/lexer/words.rs  # one file
+just mutants-iterate                  # retry only what was missed last run
+```
+
+Configuration lives in `.cargo/mutants.toml`. `src/python.rs` is excluded
+because it is behind the `python` feature and never built by `cargo test`.
+
 ## CI
 
 CI runs on every push to `main` and on pull requests. It includes:

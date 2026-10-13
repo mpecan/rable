@@ -19,7 +19,13 @@ mod backtick_opaque_tests;
 #[cfg(test)]
 mod double_quote_tests;
 #[cfg(test)]
+mod rbracket_tests;
+#[cfg(test)]
+mod test_support;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod word_span_tests;
 
 pub(crate) use heredoc::PendingHereDoc;
 

@@ -201,3 +201,49 @@ impl Token {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::TokenType;
+
+    #[test]
+    fn reserved_words_map_to_their_token_types() {
+        for (word, expected) in [
+            ("if", TokenType::If),
+            ("then", TokenType::Then),
+            ("else", TokenType::Else),
+            ("elif", TokenType::Elif),
+            ("fi", TokenType::Fi),
+            ("do", TokenType::Do),
+            ("done", TokenType::Done),
+            ("case", TokenType::Case),
+            ("esac", TokenType::Esac),
+            ("while", TokenType::While),
+            ("until", TokenType::Until),
+            ("for", TokenType::For),
+            ("select", TokenType::Select),
+            ("in", TokenType::In),
+            ("function", TokenType::Function),
+            ("time", TokenType::Time),
+            ("coproc", TokenType::Coproc),
+            ("!", TokenType::Bang),
+            ("{", TokenType::LeftBrace),
+            ("}", TokenType::RightBrace),
+            ("[[", TokenType::DoubleLeftBracket),
+            ("]]", TokenType::DoubleRightBracket),
+        ] {
+            assert_eq!(
+                TokenType::reserved_word(word),
+                Some(expected),
+                "for word {word:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_reserved_words_map_to_none() {
+        for word in ["echo", "IF", "fi2", "", "]", "{{"] {
+            assert_eq!(TokenType::reserved_word(word), None, "for word {word:?}");
+        }
+    }
+}

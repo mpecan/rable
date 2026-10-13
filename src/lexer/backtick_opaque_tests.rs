@@ -93,3 +93,17 @@ fn newlines_in_body_advance_line_counter() {
     assert_eq!(ok.value, "ok");
     assert_eq!(ok.line, 4);
 }
+
+#[test]
+#[allow(clippy::unwrap_used)]
+fn escaped_newline_in_body_advances_line_counter() {
+    // `\<newline>` inside an opaque body is consumed as a two-byte escape,
+    // but the newline still counts toward the line number of later tokens.
+    let mut lexer = Lexer::new("`else \\\nx`\nok", false);
+    let bt = lexer.next_token().unwrap();
+    assert_eq!(bt.value, "`else \\\nx`");
+    assert_eq!(lexer.next_token().unwrap().kind, TokenType::Newline);
+    let ok = lexer.next_token().unwrap();
+    assert_eq!(ok.value, "ok");
+    assert_eq!(ok.line, 3);
+}

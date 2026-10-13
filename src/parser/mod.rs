@@ -269,6 +269,10 @@ impl Parser {
 }
 
 #[cfg(test)]
+mod depth_and_errors_tests;
+#[cfg(test)]
+mod source_text_tests;
+#[cfg(test)]
 mod span_tests;
 #[cfg(test)]
 mod syntax_error_tests;

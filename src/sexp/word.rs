@@ -385,3 +385,30 @@ fn fmt_cond_term(f: &mut fmt::Formatter<'_>, value: &str, spans: &[WordSpan]) ->
     super::redirects::write_redirect_segments(f, &segments)?;
     write!(f, "\")")
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::{Node, NodeKind};
+
+    #[test]
+    fn word_literal_renders_its_raw_value() {
+        // `WordLiteral` is what `Word.parts` is mostly made of, so a
+        // consumer printing a part relies on this rendering.
+        let node = Node::empty(NodeKind::WordLiteral {
+            value: "echo".to_string(),
+        });
+        assert_eq!(node.to_string(), "echo");
+    }
+
+    #[test]
+    fn synthetic_word_without_spans_is_escaped() {
+        // No lexer spans means the value is escaped directly rather than
+        // being rebuilt from segments.
+        let node = Node::empty(NodeKind::Word {
+            value: "a\"b\\c".to_string(),
+            parts: vec![],
+            spans: vec![],
+        });
+        assert_eq!(node.to_string(), "(word \"a\\\"b\\\\c\")");
+    }
+}

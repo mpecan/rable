@@ -1,4 +1,6 @@
 /target
+mutants.out/
+mutants.out.old/
 *.pyc
 __pycache__/
 *.egg-info/

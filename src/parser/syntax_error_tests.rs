@@ -105,6 +105,19 @@ fn empty_command_in_compound_body() {
 }
 
 #[test]
+fn error_message_names_the_unexpected_token() {
+    let message = |source: &str| match try_parse(source) {
+        Err(e) => e.message().to_string(),
+        Ok(nodes) => unreachable!("{source:?}: expected error, got {nodes:?}"),
+    };
+    assert_eq!(
+        message("ls && && rm x"),
+        "syntax error near unexpected token '&&'"
+    );
+    assert_eq!(message("ls &&"), "syntax error: unexpected end of input");
+}
+
+#[test]
 fn stray_close_paren() {
     assert_syntax_error("ls )", 3);
 }

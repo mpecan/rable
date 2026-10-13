@@ -100,4 +100,6 @@ fn segment_to_node(seg: WordSegment) -> Node {
 }
 
 #[cfg(test)]
+mod ansi_c_tests;
+#[cfg(test)]
 mod tests;

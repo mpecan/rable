@@ -67,6 +67,52 @@ test-python: develop _install-parable
     import sys; import rable as p; sys.modules['parable'] = p; \
     exec(open('tests/run_tests.py').read())" -- tests/parable/
 
+# --- Mutation Testing ---
+
+# Run mutation testing over the whole crate (slow — ~1700 mutants)
+mutants *ARGS:
+    cargo mutants {{ARGS}}
+
+# Seconds to minutes instead of half an hour, so it fits in the normal
+# pre-PR loop. Diffs the merge base against the *working tree*, so it
+# covers committed and uncommitted work alike, and exits non-zero if any
+# mutant in the changed lines survives.
+#
+#   just mutants-diff              # vs main
+#   just mutants-diff origin/main  # vs the pushed base
+#   CARGO_MUTANTS_JOBS=8 just mutants-diff
+
+# Mutation-test only the lines changed vs a base ref — run this before a PR
+mutants-diff base="main":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! merge_base=$(git merge-base HEAD {{base}} 2>/dev/null); then
+        echo "Cannot find a merge base with '{{base}}'. Fetch it first, or pass another ref." >&2
+        exit 1
+    fi
+    # Explicit XXXXXX template: GNU mktemp rejects `-t PREFIX` without it.
+    diff_file=$(mktemp "${TMPDIR:-/tmp}/rable-mutants-diff.XXXXXX")
+    trap 'rm -f "$diff_file"' EXIT
+    git diff "$merge_base" -- src > "$diff_file"
+    if [ ! -s "$diff_file" ]; then
+        echo "No changes under src/ relative to '{{base}}' — nothing to mutate."
+        exit 0
+    fi
+    echo "Mutating lines changed since $(git rev-parse --short "$merge_base")..."
+    cargo mutants --in-diff "$diff_file"
+
+# Mutation-test a single file (e.g. just mutants-file src/lexer/words.rs)
+mutants-file path:
+    cargo mutants --file {{path}}
+
+# Re-test only the mutants missed/unviable in the previous run
+mutants-iterate:
+    cargo mutants --iterate
+
+# Install cargo-mutants
+install-mutants:
+    cargo install cargo-mutants --locked
+
 # --- Benchmarks ---
 
 # Run the performance benchmark (Rable vs Parable)
