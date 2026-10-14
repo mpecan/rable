@@ -7,7 +7,7 @@ use crate::token::{Token, TokenType};
 
 use super::Parser;
 use super::arithmetic::parse_arith_expression;
-use super::helpers::{is_fd_number, is_redirect_op_kind, word_node_from_token};
+use super::helpers::{is_redirect_op_kind, word_node_from_token};
 
 impl Parser {
     pub(super) fn parse_subshell(&mut self) -> Result<Node> {
@@ -160,8 +160,13 @@ impl Parser {
     /// Path D: loop over words and redirects after `coproc WORD` to collect
     /// the synthetic command's contents.
     fn parse_coproc_word_loop(&mut self, first_tok: Token) -> Result<(Vec<Node>, Vec<Node>)> {
-        let mut words = vec![word_node_from_token(first_tok)];
+        let mut words = Vec::new();
         let mut redirects = Vec::new();
+        // `coproc 2>err cmd`: the first token may itself be an fd prefix.
+        match self.try_parse_fd_redirect(&first_tok)? {
+            Some(redirect) => redirects.push(redirect),
+            None => words.push(word_node_from_token(first_tok)),
+        }
         loop {
             if self.at_end()? {
                 break;
@@ -175,10 +180,9 @@ impl Parser {
                 break;
             }
             let tok = self.lexer.next_token()?;
-            if is_fd_number(&tok.value) && self.is_redirect_operator()? {
-                redirects.push(self.parse_redirect_with_fd(&tok)?);
-            } else {
-                words.push(word_node_from_token(tok));
+            match self.try_parse_fd_redirect(&tok)? {
+                Some(redirect) => redirects.push(redirect),
+                None => words.push(word_node_from_token(tok)),
             }
         }
         Ok((words, redirects))

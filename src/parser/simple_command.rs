@@ -122,7 +122,7 @@ impl Parser {
     /// If `tok` is adjacent to an fd-style redirect prefix (`NN<`, `{var}<`),
     /// consume the redirect and return it. Otherwise return `Ok(None)` so
     /// the caller treats `tok` as a regular word/assignment.
-    fn try_parse_fd_redirect(&mut self, tok: &Token) -> Result<Option<Node>> {
+    pub(super) fn try_parse_fd_redirect(&mut self, tok: &Token) -> Result<Option<Node>> {
         if !tok.adjacent_to(self.lexer.peek_token()?) {
             return Ok(None);
         }
