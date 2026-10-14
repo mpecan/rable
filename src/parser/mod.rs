@@ -109,14 +109,20 @@ impl Parser {
         self.skip_newlines()?;
 
         while !self.at_end()? {
-            let prev_pos = self.lexer.pos();
             let mut node = self.parse_top_level_list()?;
+            // Top-level commands must be separated: `(a) b`, `esac case …`
+            // and `echo a (x)` are syntax errors in bash.
+            let next = self.lexer.peek_token()?;
+            if !matches!(next.kind, TokenType::Newline | TokenType::Eof) {
+                return Err(RableError::parse(
+                    format!("syntax error near unexpected token '{}'", next.value),
+                    next.pos,
+                    next.line,
+                ));
+            }
             self.skip_newlines()?;
             fill_heredoc_contents(&mut node, &mut self.lexer);
             nodes.push(node);
-            if self.lexer.pos() == prev_pos && !self.at_end()? {
-                self.lexer.next_token()?;
-            }
         }
 
         Ok(nodes)
