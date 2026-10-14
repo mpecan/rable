@@ -49,9 +49,11 @@ pub(super) fn cond_term_from_token(tok: Token) -> Node {
     })
 }
 
-/// Returns true if the string is a valid file descriptor number.
+/// Returns true if the string is a valid file descriptor number: all
+/// digits and within `i32` range, as bash accepts any `int` fd prefix
+/// (`100>file`, `007<in`); larger numbers stay ordinary words.
 pub(super) fn is_fd_number(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 2 && s.chars().all(|c| c.is_ascii_digit())
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) && s.parse::<i32>().is_ok()
 }
 
 /// Returns true if the string is a variable fd reference like `{varname}`.

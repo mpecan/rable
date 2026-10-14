@@ -7,6 +7,7 @@ use crate::token::{Token, TokenType};
 
 mod backtick;
 mod brace_expansion;
+mod cond_regex;
 mod expansions;
 pub(crate) mod heredoc;
 mod operators;
@@ -18,6 +19,8 @@ mod words;
 mod backtick_opaque_tests;
 #[cfg(test)]
 mod double_quote_tests;
+#[cfg(test)]
+mod heredoc_quoted_tests;
 #[cfg(test)]
 mod rbracket_tests;
 #[cfg(test)]
@@ -402,6 +405,8 @@ impl Lexer {
             }
             ')' => {
                 self.advance_char();
+                // A reserved word may follow a closing paren: `(a) done`.
+                self.set_command_start();
                 Ok(Token::new(TokenType::RightParen, ")", start, line))
             }
             '<' => {

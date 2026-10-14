@@ -177,3 +177,33 @@ fn unterminated_word_after_command_is_not_dropped() {
     // where the fd-redirect lookahead used to swallow the lexer error.
     assert_unclosed("ls -l \"x && rm y");
 }
+
+// -- separators between top-level commands -----------------------------------
+
+#[test]
+fn command_after_subshell_needs_separator() {
+    assert_syntax_error("(a) b", 4);
+    assert_syntax_error("(a) { b; }", 4);
+}
+
+#[test]
+fn subshell_after_words_needs_separator() {
+    assert_syntax_error("echo a (x)", 7);
+}
+
+#[test]
+fn compound_after_compound_needs_separator() {
+    assert_syntax_error("case x in a) ;; esac case y in b) ;; esac", 21);
+}
+
+#[test]
+fn separated_top_level_commands_still_parse() {
+    assert_eq!(
+        sexp("(a)\nb"),
+        "(subshell (command (word \"a\")))\n(command (word \"b\"))"
+    );
+    assert_eq!(
+        sexp("(a) >o; b"),
+        r#"(semi (subshell (command (word "a"))) (redirect ">" "o") (command (word "b")))"#
+    );
+}

@@ -165,9 +165,12 @@ impl Lexer {
     /// this simple command.
     ///
     /// Other words follow the existing rule: `command_start` re-arms
-    /// only for keywords that start a new command (`then`, `else`,
-    /// `elif`, `do`, `;`), and `reserved_words_ok` tracks
-    /// `command_start` directly.
+    /// for keywords that start a new command (`then`, `else`, `elif`,
+    /// `do`, `;`) and after keywords that close a compound command
+    /// (`fi`, `done`, `esac`, `}`), where bash's
+    /// `reserved_word_acceptable` also recognises reserved words — so
+    /// `…; fi done` closes the enclosing loop. `reserved_words_ok`
+    /// tracks `command_start` directly.
     fn advance_word_context(&mut self, kind: TokenType) {
         if kind == TokenType::AssignmentWord {
             self.ctx.command_start = true;
@@ -181,6 +184,10 @@ impl Lexer {
                         | TokenType::Elif
                         | TokenType::Do
                         | TokenType::Semi
+                        | TokenType::Fi
+                        | TokenType::Done
+                        | TokenType::Esac
+                        | TokenType::RightBrace
                 );
             self.ctx.reserved_words_ok = self.ctx.command_start;
         }

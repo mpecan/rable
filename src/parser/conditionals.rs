@@ -82,6 +82,9 @@ impl Parser {
 
         self.lexer.leave_cond_expr();
         self.expect_cond_close()?;
+        // `]]` is usually lexed as a plain word, so the lexer cannot see that
+        // it closed a compound command; a reserved word may follow it.
+        self.lexer.set_command_start();
         let redirects = self.parse_trailing_redirects()?;
 
         Ok(self.spanned(
@@ -203,7 +206,13 @@ impl Parser {
                 || op_tok.kind == TokenType::Greater;
             if is_binary {
                 let op = self.lexer.next_token()?;
-                let right = self.lexer.next_token()?;
+                // `=~` takes a regex operand where `(`, `)` and `|` are
+                // pattern characters, so it needs its own lexing mode.
+                let right = if op.value == "=~" {
+                    self.lexer.read_cond_regex_word()?
+                } else {
+                    self.lexer.next_token()?
+                };
                 return Ok(self.spanned(
                     start,
                     NodeKind::BinaryTest {
