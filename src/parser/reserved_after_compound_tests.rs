@@ -111,3 +111,18 @@ fn redirect_after_compound_still_parses() {
          (command (word \"c\")))"
     );
 }
+
+#[test]
+fn redirect_target_is_never_a_reserved_word() {
+    // `esac` is the file name, so the following `while` is not a command
+    // start either: bash reports a syntax error at `do`.
+    assert!(try_sexp(">esac while true; do x; done").is_err());
+    assert_eq!(
+        sexp(">out if"),
+        "(command (word \"if\") (redirect \">\" \"out\"))"
+    );
+    assert_eq!(
+        sexp("x=1 >o if"),
+        "(command (word \"x=1\") (word \"if\") (redirect \">\" \"o\"))"
+    );
+}
