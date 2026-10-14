@@ -405,6 +405,8 @@ impl Lexer {
             }
             ')' => {
                 self.advance_char();
+                // A reserved word may follow a closing paren: `(a) done`.
+                self.set_command_start();
                 Ok(Token::new(TokenType::RightParen, ")", start, line))
             }
             '<' => {

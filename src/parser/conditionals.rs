@@ -82,6 +82,9 @@ impl Parser {
 
         self.lexer.leave_cond_expr();
         self.expect_cond_close()?;
+        // `]]` is usually lexed as a plain word, so the lexer cannot see that
+        // it closed a compound command; a reserved word may follow it.
+        self.lexer.set_command_start();
         let redirects = self.parse_trailing_redirects()?;
 
         Ok(self.spanned(

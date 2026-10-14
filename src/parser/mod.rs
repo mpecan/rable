@@ -273,6 +273,8 @@ mod cond_regex_tests;
 #[cfg(test)]
 mod depth_and_errors_tests;
 #[cfg(test)]
+mod reserved_after_compound_tests;
+#[cfg(test)]
 mod source_text_tests;
 #[cfg(test)]
 mod span_tests;
