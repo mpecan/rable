@@ -14,10 +14,13 @@ use super::word_builder::WordBuilder;
 impl Lexer {
     /// Reads the regex operand following `=~` as a single `Word` token.
     ///
-    /// The word ends at `&&`, at a `)` that closes no group, or at a blank
-    /// outside any group. A `]]` inside the word (`x]]`) is part of the
-    /// pattern: it only closes the conditional as a separate token. Quotes,
-    /// escapes and `$`/backtick expansions are read as in ordinary words.
+    /// Outside any group the word ends at a blank, a `)` that closes no
+    /// group, or one of `&`, `;`, `<`, `>` — bash's operator characters,
+    /// which then make the conditional a syntax error (except `&&`/`||`).
+    /// `<(…)`/`>(…)` is a process substitution. `|` is always a pattern
+    /// character, and a `]]` inside the word (`x]]`) is part of the pattern:
+    /// it only closes the conditional as a separate token. Quotes, escapes
+    /// and `$`/backtick expansions are read as in ordinary words.
     ///
     /// # Errors
     ///
@@ -41,8 +44,11 @@ impl Lexer {
                     self.advance_char();
                     continue;
                 }
-                '&' if next == Some('&') => break,
-                ')' | ' ' | '\t' | '\n' if parens == 0 => break,
+                '<' | '>' if parens == 0 && next == Some('(') => {
+                    self.read_process_sub_into(&mut wb)?;
+                    continue;
+                }
+                ')' | ' ' | '\t' | '\n' | '&' | ';' | '<' | '>' if parens == 0 => break,
                 '\'' | '"' | '\\' | '$' | '`' => {
                     self.read_word_special(&mut wb, c)?;
                     continue;

@@ -108,3 +108,36 @@ fn missing_regex_is_an_error() {
             .is_err()
     );
 }
+
+#[test]
+fn operator_characters_outside_group_end_the_regex() {
+    // bash rejects these: the operator character ends the regex word and
+    // is not a valid conditional token.
+    for source in [
+        "[[ a =~ a<b ]]",
+        "[[ a =~ a>b ]]",
+        "[[ a =~ x;y ]]",
+        "[[ a =~ x&y ]]",
+        "[[ a =~ ^/ho|&mV ]]",
+        "[[ x =~ [[:>alpha:]] ]]",
+    ] {
+        assert!(
+            Parser::new(Lexer::new(source, false)).parse_all().is_err(),
+            "{source:?}"
+        );
+    }
+}
+
+#[test]
+fn operator_characters_inside_group_are_pattern() {
+    assert_regex_term("(a&b)");
+    assert_regex_term("(a;b)");
+}
+
+#[test]
+fn process_substitution_in_regex() {
+    assert_eq!(
+        sexp("[[ x =~ >(a|  b) ]]"),
+        "(cond (cond-binary \"=~\" (cond-term \"x\") (cond-term \">(a | b)\")))"
+    );
+}
