@@ -20,6 +20,8 @@ mod backtick_opaque_tests;
 #[cfg(test)]
 mod double_quote_tests;
 #[cfg(test)]
+mod heredoc_quoted_tests;
+#[cfg(test)]
 mod rbracket_tests;
 #[cfg(test)]
 mod test_support;
