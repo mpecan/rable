@@ -7,6 +7,7 @@ use crate::token::{Token, TokenType};
 
 mod backtick;
 mod brace_expansion;
+mod cond_regex;
 mod expansions;
 pub(crate) mod heredoc;
 mod operators;

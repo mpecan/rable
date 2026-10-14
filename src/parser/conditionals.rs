@@ -203,7 +203,13 @@ impl Parser {
                 || op_tok.kind == TokenType::Greater;
             if is_binary {
                 let op = self.lexer.next_token()?;
-                let right = self.lexer.next_token()?;
+                // `=~` takes a regex operand where `(`, `)` and `|` are
+                // pattern characters, so it needs its own lexing mode.
+                let right = if op.value == "=~" {
+                    self.lexer.read_cond_regex_word()?
+                } else {
+                    self.lexer.next_token()?
+                };
                 return Ok(self.spanned(
                     start,
                     NodeKind::BinaryTest {
