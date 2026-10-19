@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/mpecan/rable/compare/rable-v0.2.1...rable-v0.2.2) (2026-10-19)
+
+
+### Bug Fixes
+
+* high-impact divergences from bash-oracle (regex, quoted heredocs, reserved words, fd prefixes) ([#81](https://github.com/mpecan/rable/issues/81)) ([c01b785](https://github.com/mpecan/rable/commit/c01b785bd67de10207564d95ff66f05423f82fa5))
+
 ## [0.2.1](https://github.com/mpecan/rable/compare/rable-v0.2.0...rable-v0.2.1) (2026-06-20)
 
 
