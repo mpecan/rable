@@ -8,7 +8,8 @@ impl Lexer {
     /// `;&`, `;;&`). Sets `command_start` and re-arms reserved-word
     /// recognition for the token that follows. File-redirect operators
     /// (`<<`, `>>`, `<&`, `&>`, etc.) use plain `Token::new` instead
-    /// because they do not start a new simple command.
+    /// because they do not start a new simple command; they disable
+    /// reserved words via [`Self::expect_redirect_target`].
     fn command_token(
         &mut self,
         kind: TokenType,
@@ -44,6 +45,7 @@ impl Lexer {
             }
             Some('>') => {
                 self.advance_char();
+                self.expect_redirect_target();
                 if self.peek_char() == Some('>') {
                     self.advance_char();
                     Token::new(TokenType::AndDoubleGreater, "&>>", start, line)
@@ -75,7 +77,14 @@ impl Lexer {
         }
     }
 
+    /// The word after a redirect operator is its target, never a reserved
+    /// word: `>esac while …` redirects to a file named `esac`.
+    const fn expect_redirect_target(&mut self) {
+        self.ctx.reserved_words_ok = false;
+    }
+
     pub(super) fn read_less_operator(&mut self, start: usize, line: usize) -> Token {
+        self.expect_redirect_target();
         self.advance_char(); // consume '<'
         match self.peek_char() {
             Some('<') => {
@@ -111,6 +120,7 @@ impl Lexer {
     }
 
     pub(super) fn read_greater_operator(&mut self, start: usize, line: usize) -> Token {
+        self.expect_redirect_target();
         self.advance_char(); // consume '>'
         match self.peek_char() {
             Some('>') => {

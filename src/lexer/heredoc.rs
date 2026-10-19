@@ -45,6 +45,9 @@ pub(crate) fn parse_heredoc_delimiter(raw: &str) -> (String, bool) {
 pub(crate) struct PendingHereDoc {
     pub(crate) delimiter: String,
     pub(crate) strip_tabs: bool,
+    /// The delimiter was quoted (`<<'EOF'`, `<<"EOF"`, `<<\EOF`): the body
+    /// is literal, so `\<newline>` is not a line continuation.
+    pub(crate) quoted: bool,
 }
 
 /// One heredoc body line in normalized form (delimiter-match-ready) plus
@@ -61,10 +64,11 @@ struct ReadLine {
 
 impl Lexer {
     /// Queues a here-document to be read after the next newline.
-    pub(crate) fn queue_heredoc(&mut self, delimiter: String, strip_tabs: bool) {
+    pub(crate) fn queue_heredoc(&mut self, delimiter: String, strip_tabs: bool, quoted: bool) {
         self.pending_heredocs.push(PendingHereDoc {
             delimiter,
             strip_tabs,
+            quoted,
         });
     }
 
@@ -72,7 +76,7 @@ impl Lexer {
     pub(super) fn read_pending_heredocs(&mut self) {
         let pending: Vec<_> = self.pending_heredocs.drain(..).collect();
         for hd in pending {
-            let content = self.read_heredoc_body(&hd.delimiter, hd.strip_tabs);
+            let content = self.read_heredoc_body(&hd);
             self.heredoc_contents.push(content);
         }
     }
@@ -86,7 +90,8 @@ impl Lexer {
     /// cmdsub closers. Mirrors bash's "delimited by end-of-file"
     /// recovery path for heredocs whose terminator is on the same line
     /// as the enclosing construct's closing parens (issue #39).
-    pub(super) fn read_heredoc_body(&mut self, delimiter: &str, strip_tabs: bool) -> String {
+    pub(super) fn read_heredoc_body(&mut self, hd: &PendingHereDoc) -> String {
+        let (delimiter, strip_tabs) = (hd.delimiter.as_str(), hd.strip_tabs);
         let cmdsub_mode = self.mode == super::LexerMode::Cmdsub;
         let mut content = String::new();
         loop {
@@ -97,7 +102,7 @@ impl Lexer {
                 line,
                 eof_after_backslash,
                 terminated_at_eof,
-            } = self.read_heredoc_line();
+            } = self.read_heredoc_line(hd.quoted);
             // Check if this line matches the delimiter
             let check_line = if strip_tabs {
                 line.trim_start_matches('\t')
@@ -133,8 +138,9 @@ impl Lexer {
 
     /// Reads one logical line of heredoc input in normalized form
     /// (line-continuations collapsed, trailing `\n` excluded, backslash-EOF
-    /// doubled) plus termination flags.
-    fn read_heredoc_line(&mut self) -> ReadLine {
+    /// doubled) plus termination flags. A `literal` (quoted-delimiter) body
+    /// gets no backslash processing: every physical line stands alone.
+    fn read_heredoc_line(&mut self, literal: bool) -> ReadLine {
         let mut line = String::new();
         let mut prev_backslash = false;
         let mut eof_after_backslash = false;
@@ -146,6 +152,10 @@ impl Lexer {
                 break;
             }
             // Line continuation: \<newline> joins lines (but not \\<newline>)
+            if literal {
+                line.push(c);
+                continue;
+            }
             if c == '\\' && !prev_backslash && self.peek_char() == Some('\n') {
                 self.advance_char();
                 prev_backslash = false;

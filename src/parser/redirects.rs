@@ -107,7 +107,8 @@ impl Parser {
         let delim_tok = self.lexer.next_token()?;
         let strip_tabs = op_tok.kind == TokenType::DoubleLessDash;
         let (delimiter, quoted) = parse_heredoc_delimiter(&delim_tok.value);
-        self.lexer.queue_heredoc(delimiter.clone(), strip_tabs);
+        self.lexer
+            .queue_heredoc(delimiter.clone(), strip_tabs, quoted);
         Ok(self.spanned(
             start,
             NodeKind::HereDoc {

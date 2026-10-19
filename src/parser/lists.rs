@@ -367,7 +367,10 @@ impl Parser {
                     continue;
                 }
                 let t = self.lexer.next_token()?;
-                words.push(word_node_from_token(t));
+                match self.try_parse_fd_redirect(&t)? {
+                    Some(redirect) => redirects.push(redirect),
+                    None => words.push(word_node_from_token(t)),
+                }
             }
             Ok(self.spanned(
                 start,

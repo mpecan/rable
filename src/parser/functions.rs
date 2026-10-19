@@ -7,7 +7,7 @@ use crate::token::{Token, TokenType};
 
 use super::Parser;
 use super::arithmetic::parse_arith_expression;
-use super::helpers::{is_fd_number, is_redirect_op_kind, word_node_from_token};
+use super::helpers::{is_redirect_op_kind, word_node_from_token};
 
 impl Parser {
     pub(super) fn parse_subshell(&mut self) -> Result<Node> {
@@ -118,12 +118,14 @@ impl Parser {
         }
 
         let first_tok = self.lexer.next_token()?;
-        self.lexer.set_command_start();
 
-        // Path B: `coproc <redir ...` — synthetic command with only redirects.
+        // Path B: `coproc <redir ...` — synthetic command starting with a
+        // redirect. The redirect target must not be re-armed as a command
+        // start, so this check comes before `set_command_start`.
         if is_redirect_op_kind(first_tok.kind) {
-            return self.parse_coproc_redirect_only(start, first_tok);
+            return self.parse_coproc_redirect_first(start, first_tok);
         }
+        self.lexer.set_command_start();
 
         // Path C: `coproc NAME CMD` — named coproc, `first_tok` is the name.
         if coproc_starts_command(self.lexer.peek_token()?.kind) {
@@ -150,18 +152,35 @@ impl Parser {
     }
 
     /// Path B: first token after `coproc` is a redirect operator. Build a
-    /// synthetic `Command { redirects }` wrapped in a nameless `Coproc`.
-    fn parse_coproc_redirect_only(&mut self, start: usize, first_tok: Token) -> Result<Node> {
-        let mut redirects = vec![self.build_redirect(first_tok, -1, None)?];
-        redirects.extend(self.parse_trailing_redirects()?);
-        Ok(self.build_coproc_synthetic_command(start, None, Vec::new(), redirects))
+    /// synthetic `Command` (`coproc >&fd cmd args`) wrapped in a nameless
+    /// `Coproc`.
+    fn parse_coproc_redirect_first(&mut self, start: usize, first_tok: Token) -> Result<Node> {
+        let redirects = vec![self.build_redirect(first_tok, -1, None)?];
+        let (words, redirects) = self.collect_coproc_words(Vec::new(), redirects)?;
+        Ok(self.build_coproc_synthetic_command(start, None, words, redirects))
     }
 
     /// Path D: loop over words and redirects after `coproc WORD` to collect
     /// the synthetic command's contents.
     fn parse_coproc_word_loop(&mut self, first_tok: Token) -> Result<(Vec<Node>, Vec<Node>)> {
-        let mut words = vec![word_node_from_token(first_tok)];
+        let mut words = Vec::new();
         let mut redirects = Vec::new();
+        // `coproc 2>err cmd`: the first token may itself be an fd prefix.
+        match self.try_parse_fd_redirect(&first_tok)? {
+            Some(redirect) => redirects.push(redirect),
+            None => words.push(word_node_from_token(first_tok)),
+        }
+        self.collect_coproc_words(words, redirects)
+    }
+
+    /// Appends the remaining words (assignment-shaped ones included, as
+    /// they are ordinary arguments here) and redirects of a synthetic
+    /// coproc command.
+    fn collect_coproc_words(
+        &mut self,
+        mut words: Vec<Node>,
+        mut redirects: Vec<Node>,
+    ) -> Result<(Vec<Node>, Vec<Node>)> {
         loop {
             if self.at_end()? {
                 break;
@@ -171,14 +190,16 @@ impl Parser {
                 continue;
             }
             let tok = self.lexer.peek_token()?;
-            if !matches!(tok.kind, TokenType::Word | TokenType::Number) {
+            if !matches!(
+                tok.kind,
+                TokenType::Word | TokenType::Number | TokenType::AssignmentWord
+            ) {
                 break;
             }
             let tok = self.lexer.next_token()?;
-            if is_fd_number(&tok.value) && self.is_redirect_operator()? {
-                redirects.push(self.parse_redirect_with_fd(&tok)?);
-            } else {
-                words.push(word_node_from_token(tok));
+            match self.try_parse_fd_redirect(&tok)? {
+                Some(redirect) => redirects.push(redirect),
+                None => words.push(word_node_from_token(tok)),
             }
         }
         Ok((words, redirects))
