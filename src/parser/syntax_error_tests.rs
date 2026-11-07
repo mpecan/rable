@@ -260,3 +260,64 @@ fn for_in_list_rejects_operators() {
         "(for (word \"i\") (in (word \"if\") (word \"then\") (word \"fi\")) (command (word \":\")))"
     );
 }
+
+// -- array assignments ------------------------------------------------------
+
+/// Asserts `source` parses to a single command whose words are `words`.
+fn assert_words(source: &str, words: &[&str]) {
+    let escape = |w: &str| w.replace('\\', "\\\\").replace('"', "\\\"");
+    let expected: Vec<String> = words
+        .iter()
+        .map(|w| format!("(word \"{}\")", escape(w)))
+        .collect();
+    let got = sexp(source);
+    assert!(
+        got.starts_with(&format!("(command {}", expected.join(" "))),
+        "{source:?}: got {got}"
+    );
+}
+
+#[test]
+fn array_assignment_needs_assignment_position() {
+    assert_syntax_error("echo a=(1 2)", 7);
+    assert_syntax_error("a r=(foo)", 4);
+    assert_syntax_error("a1 b=2 arr=(x y)", 11);
+    assert_syntax_error("command declare a=(x)", 18);
+    assert_syntax_error("a=(x) 2>f b=(y)", 12);
+    assert_syntax_error("declare >f a=(x)", 13);
+    assert_words("x=1 a=(1 2) cmd", &["x=1", "a=(1 2)", "cmd"]);
+    assert_words("declare -a a=(1 2)", &["declare", "-a", "a=(1 2)"]);
+    assert_words("x=1 local a=(x) b=(y)", &["x=1", "local", "a=(x)", "b=(y)"]);
+    assert_words(">f a=(x)", &["a=(x)"]);
+    assert_words("2>&1 >&- a=(x)", &["a=(x)"]);
+    assert_words("{fd}>f declare a=(x)", &["declare", "a=(x)"]);
+}
+
+#[test]
+fn array_assignment_needs_a_valid_name() {
+    assert_syntax_error("1a=(x)", 4);
+    assert_syntax_error("a$b=(x)", 5);
+    assert_words("a[0]=(1 2)", &["a[0]=(1 2)"]);
+    assert_words("a+=(1 2)", &["a+=(1 2)"]);
+}
+
+#[test]
+fn array_elements_reject_unquoted_operators() {
+    assert_syntax_error("a=(x;y)", 4);
+    assert_syntax_error("a=(x|y)", 4);
+    assert_syntax_error("a=(x&)", 4);
+    assert_syntax_error("a=(x>y)", 4);
+    assert_syntax_error("a=((x))", 3);
+    assert_syntax_error("a=([k]=(v))", 7);
+    assert_words(r#"a=("a;b" 'c|d' a\;b)"#, &[r#"a=("a;b" 'c|d' a\;b)"#]);
+    assert_words("a=(<(x) >(y))", &["a=(<(x) >(y))"]);
+    assert_words("a=($(x;y))", &["a=($(x; y))"]);
+}
+
+#[test]
+fn array_subscript_is_bracket_matched() {
+    assert_words("arr=([a;b]=1 [c d]=2)", &["arr=([a;b]=1 [c d]=2)"]);
+    assert_words("arr=([a)b]=1)", &["arr=([a)b]=1)"]);
+    assert_syntax_error("arr=([a]=1;)", 10);
+    assert_syntax_error("arr=(x[;])", 7);
+}

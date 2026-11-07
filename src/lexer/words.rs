@@ -4,7 +4,7 @@ use crate::error::{RableError, Result};
 use crate::token::{Token, TokenType};
 
 use super::Lexer;
-use super::assignment::is_assignment_word;
+use super::assignment::{is_assignment_builtin, is_assignment_word};
 use super::word_builder::{WordBuilder, WordSpanKind};
 
 impl Lexer {
@@ -56,7 +56,8 @@ impl Lexer {
         }
 
         let kind = self.classify_word(&wb);
-        self.advance_word_context(kind);
+        let fd_prefix = is_fd_prefix(&wb.value) && matches!(self.peek_char(), Some('<' | '>'));
+        self.advance_word_context(kind, &wb.value, fd_prefix);
         Ok(Token::with_spans(kind, wb.value, start, line, wb.spans))
     }
 
@@ -78,13 +79,14 @@ impl Lexer {
 
     /// Handles `(` encountered mid-word. Three outcomes:
     ///
-    /// * preceded by `=` — array assignment `arr=(…)`; consume the
+    /// * preceded by `name=` / `name+=` / `name[sub]=` where an assignment
+    ///   is allowed — array assignment `arr=(…)`; consume the
     ///   parenthesised element list and keep reading.
     /// * preceded by an extglob prefix (`@`, `?`, `+`, or `!`/`*` when
     ///   extglob is on) — extglob pattern `@(…)`, `*(…)`, etc.
     /// * otherwise `(` is a metacharacter that terminates the word.
     fn read_open_paren_word(&mut self, wb: &mut WordBuilder) -> Result<ControlFlow<()>> {
-        if wb.ends_with('=') {
+        if wb.ends_with('=') && self.array_assignment_allowed(wb) {
             self.advance_char();
             wb.push('(');
             self.read_array_elements(wb)?;
@@ -160,10 +162,12 @@ impl Lexer {
     /// Updates `command_start` / `reserved_words_ok` for the token
     /// that follows the word just emitted.
     ///
-    /// `AssignmentWord` keeps `command_start=true` (assignments chain
-    /// and the eventual command word is still at command position)
-    /// but clears `reserved_words_ok` — no more reserved words in
-    /// this simple command.
+    /// Redirect fd prefixes and targets leave the context untouched.
+    ///
+    /// `AssignmentWord` keeps `command_start` as it was — still true in
+    /// a leading chain (`a=1 b=(x) cmd`), still false for an argument
+    /// (`cmd a=1`) — but clears `reserved_words_ok`: no more reserved
+    /// words in this simple command.
     ///
     /// Other words follow the existing rule: `command_start` re-arms
     /// for keywords that start a new command (`then`, `else`, `elif`,
@@ -172,9 +176,24 @@ impl Lexer {
     /// `reserved_word_acceptable` also recognises reserved words — so
     /// `…; fi done` closes the enclosing loop. `reserved_words_ok`
     /// tracks `command_start` directly.
-    fn advance_word_context(&mut self, kind: TokenType) {
+    fn advance_word_context(&mut self, kind: TokenType, value: &str, fd_prefix: bool) {
+        // Redirect fd prefixes (`2>`, `{fd}>`) and targets are not part of
+        // the command's words, so they leave its context unchanged.
+        if self.ctx.redirect_target {
+            self.ctx.redirect_target = false;
+            return;
+        }
+        if fd_prefix {
+            return;
+        }
+        // The first word of a command decides whether later `name=(…)`
+        // arguments are arrays; leading assignments defer the decision.
+        if self.ctx.command_start && kind != TokenType::AssignmentWord {
+            self.ctx.assignment_builtin = kind == TokenType::Word && is_assignment_builtin(value);
+        }
         if kind == TokenType::AssignmentWord {
-            self.ctx.command_start = true;
+            // Assignments chain at command start (`a=1 b=(x) cmd`) but an
+            // assignment-shaped argument (`cmd a=1`) does not re-arm it.
             self.ctx.reserved_words_ok = false;
         } else {
             self.ctx.command_start = kind.starts_command()
@@ -192,6 +211,9 @@ impl Lexer {
                 );
             self.ctx.reserved_words_ok = self.ctx.command_start;
         }
+        // Assignments and command words count; a keyword that starts a
+        // new command (`then`, `do`, …) does not.
+        self.ctx.command_has_word = kind == TokenType::AssignmentWord || !self.ctx.command_start;
     }
 
     /// Reads a quoted string, escape, dollar expansion, or backtick within a word.
@@ -298,6 +320,9 @@ impl Lexer {
                 '$' => {
                     self.read_dollar(wb)?;
                 }
+                '`' => {
+                    self.read_word_special(wb, c)?;
+                }
                 _ => {
                     self.advance_char();
                     wb.push(c);
@@ -335,8 +360,7 @@ impl Lexer {
         wb.record(span_start, WordSpanKind::ProcessSub(dir));
         // Continue reading word chars after the process substitution
         self.continue_word(&mut wb)?;
-        self.ctx.command_start = false;
-        self.ctx.reserved_words_ok = false;
+        self.advance_word_context(TokenType::Word, &wb.value, false);
         Ok(Token::with_spans(
             TokenType::Word,
             wb.value,
@@ -389,4 +413,13 @@ fn is_identifier_prefix(value: &str) -> bool {
     bytes[1..]
         .iter()
         .all(|b| matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_'))
+}
+
+/// Returns true if a word value matches the assignment pattern `NAME=`,
+/// `NAME+=`, or `NAME[...]=` / `NAME[...]+=`.
+/// A redirect fd prefix: digits (`2>`) or a `{name}` variable fd (`{fd}>`).
+fn is_fd_prefix(value: &str) -> bool {
+    let all_digits = !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit());
+    let varfd = value.len() > 2 && value.starts_with('{') && value.ends_with('}');
+    all_digits || varfd
 }

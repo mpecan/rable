@@ -78,9 +78,28 @@ impl Lexer {
     }
 
     /// The word after a redirect operator is its target, never a reserved
-    /// word: `>esac while …` redirects to a file named `esac`.
+    /// word: `>esac while …` redirects to a file named `esac`. A redirect
+    /// after the command's first word or assignment also ends assignment
+    /// position, so `a=(x) >f b=(y)` is not an array assignment.
     const fn expect_redirect_target(&mut self) {
         self.ctx.reserved_words_ok = false;
+        self.ctx.redirect_target = true;
+        if self.ctx.command_has_word {
+            self.ctx.command_start = false;
+            self.ctx.assignment_builtin = false;
+        }
+    }
+
+    /// `<&-` / `>&-` close an fd and take no target word.
+    fn close_fd_token(
+        &mut self,
+        kind: TokenType,
+        text: &'static str,
+        start: usize,
+        line: usize,
+    ) -> Token {
+        self.ctx.redirect_target = false;
+        Token::new(kind, text, start, line)
     }
 
     pub(super) fn read_less_operator(&mut self, start: usize, line: usize) -> Token {
@@ -106,7 +125,7 @@ impl Lexer {
                 // <&- is close-fd (complete operator)
                 if self.peek_char() == Some('-') {
                     self.advance_char();
-                    Token::new(TokenType::LessAnd, "<&-", start, line)
+                    self.close_fd_token(TokenType::LessAnd, "<&-", start, line)
                 } else {
                     Token::new(TokenType::LessAnd, "<&", start, line)
                 }
@@ -132,7 +151,7 @@ impl Lexer {
                 // >&- is close-fd (complete operator)
                 if self.peek_char() == Some('-') {
                     self.advance_char();
-                    Token::new(TokenType::GreaterAnd, ">&-", start, line)
+                    self.close_fd_token(TokenType::GreaterAnd, ">&-", start, line)
                 } else {
                     Token::new(TokenType::GreaterAnd, ">&", start, line)
                 }

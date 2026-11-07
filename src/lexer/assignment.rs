@@ -7,6 +7,17 @@ use super::Lexer;
 use super::word_builder::WordBuilder;
 
 impl Lexer {
+    /// True if `wb` (ending in `=`) starts a compound array assignment:
+    /// a valid assignment prefix, in assignment position (command start,
+    /// including after other assignments) or as an argument to an
+    /// assignment builtin. `echo a=(x)` and `1a=(x)` are syntax errors.
+    pub(super) fn array_assignment_allowed(&self, wb: &WordBuilder) -> bool {
+        // The `=` just read must end the prefix: `a=()b=(` is not a second array.
+        !self.ctx.redirect_target
+            && assignment_prefix_len(&wb.value) == Some(wb.value.len())
+            && (self.ctx.command_start || self.ctx.assignment_builtin)
+    }
+
     /// Reads array elements from `(...)`, producing normalized content.
     ///
     /// Parses individual elements separated by whitespace directly from
@@ -51,19 +62,27 @@ impl Lexer {
     }
 
     /// Reads a single array element using the same word-reading logic
-    /// as `read_word_token`, but with `)` and whitespace as terminators
-    /// instead of the standard shell metacharacters.
+    /// as `read_word_token`, but with `)` and whitespace as terminators.
+    /// Other unquoted metacharacters are syntax errors, as in bash.
     fn read_array_element(&mut self, wb: &mut WordBuilder) -> Result<()> {
+        // A leading `[subscript]` is bracket-matched verbatim, operators
+        // and blanks included: `arr=([a;b]=1)` is valid bash.
+        if self.peek_char() == Some('[') {
+            self.read_bracket_subscript(wb)?;
+        }
         while let Some(c) = self.peek_char() {
             match c {
                 ' ' | '\t' | '\n' | '\r' | ')' => break,
-                '<' | '>' => {
-                    if self.input.get(self.pos + 1) == Some(&'(') {
-                        self.read_process_sub_into(wb)?;
-                    } else {
-                        self.advance_char();
-                        wb.push(c);
-                    }
+                '<' | '>' if self.input.get(self.pos + 1) == Some(&'(') => {
+                    self.read_process_sub_into(wb)?;
+                }
+                // Unquoted operators are syntax errors inside `(…)`.
+                ';' | '&' | '|' | '(' | '<' | '>' => {
+                    return Err(RableError::parse(
+                        format!("syntax error near unexpected token '{c}'"),
+                        self.pos,
+                        self.line,
+                    ));
                 }
                 '\'' | '"' | '\\' | '$' | '`' => {
                     self.read_word_special(wb, c)?;
@@ -78,13 +97,25 @@ impl Lexer {
     }
 }
 
-/// Returns true if a word value matches the assignment pattern `NAME=`,
-/// `NAME+=`, or `NAME[...]=` / `NAME[...]+=`.
+/// Builtins whose `name=(…)` arguments bash parses as array assignments.
+pub(super) fn is_assignment_builtin(value: &str) -> bool {
+    matches!(
+        value,
+        "alias" | "declare" | "eval" | "export" | "let" | "local" | "readonly" | "typeset"
+    )
+}
+
 pub(super) fn is_assignment_word(value: &str) -> bool {
+    assignment_prefix_len(value).is_some()
+}
+
+/// Length in bytes of the `name=`, `name+=` or `name[sub]=` prefix that
+/// makes `value` an assignment, or `None` if it is not one.
+fn assignment_prefix_len(value: &str) -> Option<usize> {
     let bytes = value.as_bytes();
     // Must start with [a-zA-Z_]
     if !matches!(bytes.first(), Some(b'a'..=b'z' | b'A'..=b'Z' | b'_')) {
-        return false;
+        return None;
     }
     let mut i = 1;
     // Continue with [a-zA-Z_0-9]
@@ -100,16 +131,16 @@ pub(super) fn is_assignment_word(value: &str) -> bool {
                     match bytes[i] {
                         b'[' => depth += 1,
                         b']' => depth -= 1,
-                        b' ' | b'\t' | b'\n' => return false,
+                        b' ' | b'\t' | b'\n' => return None,
                         _ => {}
                     }
                     i += 1;
                 }
             }
-            b'+' if i + 1 < bytes.len() && bytes[i + 1] == b'=' => return true,
-            b'=' => return true,
-            _ => return false,
+            b'+' if i + 1 < bytes.len() && bytes[i + 1] == b'=' => return Some(i + 2),
+            b'=' => return Some(i + 1),
+            _ => return None,
         }
     }
-    false
+    None
 }

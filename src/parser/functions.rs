@@ -166,9 +166,11 @@ impl Parser {
         let mut words = Vec::new();
         let mut redirects = Vec::new();
         // `coproc 2>err cmd`: the first token may itself be an fd prefix.
-        match self.try_parse_fd_redirect(&first_tok)? {
-            Some(redirect) => redirects.push(redirect),
-            None => words.push(word_node_from_token(first_tok)),
+        if let Some(redirect) = self.try_parse_fd_redirect(&first_tok)? {
+            redirects.push(redirect);
+        } else {
+            self.lexer.mark_command_word();
+            words.push(word_node_from_token(first_tok));
         }
         self.collect_coproc_words(words, redirects)
     }

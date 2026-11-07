@@ -104,11 +104,25 @@ pub(crate) enum LexerMode {
 impl Lexer {
     // -- State API for parser --
 
+    /// Signal that the parser consumed a command word after re-arming
+    /// command start (the `coproc WORD …` path). The lookahead token is
+    /// already lexed, so only a redirect it opened is affected: as in
+    /// `expect_redirect_target`, a redirect after a word ends assignment
+    /// position (`coproc cat <f a[x y]` must not read a subscript).
+    pub(crate) const fn mark_command_word(&mut self) {
+        if self.ctx.redirect_target {
+            self.ctx.command_start = false;
+            self.ctx.assignment_builtin = false;
+            self.ctx.command_has_word = true;
+        }
+    }
+
     /// Signal that the next word position is a command start. Also
     /// re-arms reserved-word recognition — a fresh command is always
     /// allowed to begin with a reserved word.
     pub(crate) const fn set_command_start(&mut self) {
         self.ctx.command_start = true;
+        self.ctx.command_has_word = false;
         self.ctx.reserved_words_ok = true;
     }
 
@@ -366,6 +380,8 @@ impl Lexer {
                 self.advance_char();
                 self.ctx.command_start = true;
                 self.ctx.reserved_words_ok = true;
+                self.ctx.command_has_word = false;
+                self.ctx.redirect_target = false;
                 // Read any pending here-documents after the newline
                 if !self.pending_heredocs.is_empty() {
                     self.read_pending_heredocs();
