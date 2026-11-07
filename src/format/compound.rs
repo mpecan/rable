@@ -270,12 +270,18 @@ impl Formatter {
         self.write_trailing_redirects(redirects);
     }
 
+    /// Bash prints `time` before `!` whichever order they were written
+    /// in: `! time a` and `time ! a` both become `time ! a`.
     pub(super) fn format_negation(&mut self, node: &Node) {
         let NodeKind::Negation { pipeline } = &node.kind else {
             return;
         };
-        self.write_str("! ");
-        self.format_node(pipeline);
+        if let NodeKind::Time { pipeline, posix } = &pipeline.kind {
+            self.write_time_keyword(*posix);
+            self.write_prefix_then(pipeline, "!");
+        } else {
+            self.write_prefix_then(pipeline, "!");
+        }
     }
 
     pub(super) fn format_time(&mut self, node: &Node) {
@@ -283,11 +289,26 @@ impl Formatter {
             return;
         };
         if *posix {
-            self.write_str("time -p ");
+            self.write_prefix_then(pipeline, "time -p");
         } else {
-            self.write_str("time ");
+            self.write_prefix_then(pipeline, "time");
         }
-        self.format_node(pipeline);
+    }
+
+    fn write_time_keyword(&mut self, posix: bool) {
+        self.write_str(if posix { "time -p " } else { "time " });
+    }
+
+    /// Writes `prefix` and a space, then `pipeline`. For a bare `!` or
+    /// `time` the space is kept even at the end, as bash does (`$(! )`).
+    fn write_prefix_then(&mut self, pipeline: &Node, prefix: &str) {
+        self.write_str(prefix);
+        if matches!(pipeline.kind, NodeKind::Empty) {
+            self.write_kept_space();
+        } else {
+            self.write_char(' ');
+            self.format_node(pipeline);
+        }
     }
 
     pub(super) fn format_coproc(&mut self, node: &Node) {

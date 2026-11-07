@@ -107,6 +107,21 @@ mod tests {
     }
 
     #[test]
+    fn bare_negation_and_time_keep_their_space() {
+        // bash prints `! ` / `time ` before the (empty) command: `$(! )`.
+        assert_eq!(reformat("! ;"), "! ");
+        assert_eq!(reformat("a && time ;"), "a && time ");
+        assert_eq!(reformat("! ; b"), "! ; b");
+    }
+
+    #[test]
+    fn time_is_printed_before_negation() {
+        assert_eq!(reformat("! time a"), "time ! a");
+        assert_eq!(reformat("time ! a"), "time ! a");
+        assert_eq!(reformat("! time -p a"), "time -p ! a");
+    }
+
+    #[test]
     fn plain_word_input_is_left_alone() {
         // Reformatting is skipped when the content is nothing but word
         // characters — there is no layout to canonicalize, and re-emitting
