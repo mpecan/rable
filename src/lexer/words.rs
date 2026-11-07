@@ -82,8 +82,8 @@ impl Lexer {
     /// * preceded by `name=` / `name+=` / `name[sub]=` where an assignment
     ///   is allowed — array assignment `arr=(…)`; consume the
     ///   parenthesised element list and keep reading.
-    /// * preceded by an extglob prefix (`@ ? + ! *`) when extended
-    ///   patterns are enabled — extglob pattern `@(…)`, `*(…)`, etc.
+    /// * preceded by an extglob prefix (`@ ? + ! *`) when extglob is on
+    ///   — extglob pattern `@(…)`, `*(…)`, etc.
     /// * otherwise `(` is a metacharacter that terminates the word.
     fn read_open_paren_word(&mut self, wb: &mut WordBuilder) -> Result<ControlFlow<()>> {
         if wb.ends_with('=') && self.array_assignment_allowed(wb) {
@@ -91,7 +91,7 @@ impl Lexer {
             wb.push('(');
             self.read_array_elements(wb)?;
             Ok(ControlFlow::Continue(()))
-        } else if self.extglob_enabled() && wb.value.ends_with(['@', '?', '+', '!', '*']) {
+        } else if self.config.extglob && wb.value.ends_with(['@', '?', '+', '!', '*']) {
             self.advance_char();
             wb.push('(');
             self.read_matched_parens(wb, 1)?;
@@ -103,19 +103,12 @@ impl Lexer {
 
     /// Returns true if `c` at the current position opens an extglob
     /// pattern: a prefix character (`@ ? + ! *`) followed immediately by
-    /// `(`, where extended patterns are enabled.
+    /// `(`, when extglob is on (see also `Lexer::next_pattern_token`).
     fn is_extglob_trigger(&self, c: char) -> bool {
         if self.input.get(self.pos + 1) != Some(&'(') {
             return false;
         }
-        self.extglob_enabled() && matches!(c, '@' | '?' | '+' | '!' | '*')
-    }
-
-    /// Extended patterns are recognised when extglob is on, and for the
-    /// pattern operand of `==`/`=`/`!=` in `[[ … ]]`, where bash enables
-    /// them while parsing.
-    const fn extglob_enabled(&self) -> bool {
-        self.config.extglob || self.ctx.cond_pattern
+        self.config.extglob && matches!(c, '@' | '?' | '+' | '!' | '*')
     }
 
     /// Returns true if a `[` at the current position should open a
@@ -179,8 +172,6 @@ impl Lexer {
     /// `…; fi done` closes the enclosing loop. `reserved_words_ok`
     /// tracks `command_start` directly.
     fn advance_word_context(&mut self, kind: TokenType, value: &str, fd_prefix: bool) {
-        self.ctx.cond_pattern =
-            self.ctx.cond_expr && kind == TokenType::Word && matches!(value, "==" | "=" | "!=");
         // Redirect fd prefixes (`2>`, `{fd}>`) and targets are not part of
         // the command's words, so they leave its context unchanged.
         if self.ctx.redirect_target {

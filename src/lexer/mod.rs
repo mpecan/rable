@@ -313,6 +313,21 @@ impl Lexer {
         }
     }
 
+    /// Returns the next token with extended patterns recognised whatever
+    /// the extglob setting: bash enables them for the pattern operand of
+    /// `==`, `=` and `!=` in `[[ … ]]` (`[[ x == @(a|b) ]]`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `RableError` on unterminated quotes or unexpected input.
+    pub(crate) fn next_pattern_token(&mut self) -> Result<Token> {
+        let extglob = self.config.extglob;
+        self.config.extglob = true;
+        let tok = self.next_token();
+        self.config.extglob = extglob;
+        tok
+    }
+
     /// Returns the next token, consuming it.
     ///
     /// # Errors

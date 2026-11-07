@@ -207,11 +207,12 @@ impl Parser {
             if is_binary {
                 let op = self.lexer.next_token()?;
                 // `=~` takes a regex operand where `(`, `)` and `|` are
-                // pattern characters, so it needs its own lexing mode.
-                let right = if op.value == "=~" {
-                    self.lexer.read_cond_regex_word()?
-                } else {
-                    self.lexer.next_token()?
+                // pattern characters, so it needs its own lexing mode; the
+                // pattern operators always allow extended patterns.
+                let right = match op.value.as_str() {
+                    "=~" => self.lexer.read_cond_regex_word()?,
+                    "==" | "=" | "!=" => self.lexer.next_pattern_token()?,
+                    _ => self.lexer.next_token()?,
                 };
                 return Ok(self.spanned(
                     start,

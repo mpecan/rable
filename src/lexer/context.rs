@@ -17,10 +17,6 @@ pub(crate) struct LexerContext {
     pub(crate) reserved_words_ok: bool,
     /// Inside a `[[ ]]` conditional expression.
     pub(crate) cond_expr: bool,
-    /// The next word is the pattern operand of `==`, `=` or `!=` inside
-    /// `[[ ]]`, where bash recognises extended patterns even with extglob
-    /// off: `[[ x == @(a|b) ]]`, but not `[[ !( -f a ) ]]`.
-    pub(crate) cond_pattern: bool,
     /// The current simple command's first word is an assignment builtin
     /// (`declare`, `local`, …), so its `name=(…)` arguments are array
     /// assignments too.
@@ -39,7 +35,6 @@ impl Default for LexerContext {
             command_start: true,
             reserved_words_ok: true,
             cond_expr: false,
-            cond_pattern: false,
             assignment_builtin: false,
             redirect_target: false,
             command_has_word: false,
