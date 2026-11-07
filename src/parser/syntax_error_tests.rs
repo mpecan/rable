@@ -207,3 +207,17 @@ fn separated_top_level_commands_still_parse() {
         r#"(semi (subshell (command (word "a"))) (redirect ">" "o") (command (word "b")))"#
     );
 }
+
+#[test]
+fn fd_number_after_compound_is_not_dropped() {
+    assert_syntax_error("(a)1", 3);
+    assert_syntax_error("(a) 12", 4);
+    assert_syntax_error("! (a)1", 5);
+    assert_syntax_error("{ a; } 1", 7);
+    assert_syntax_error("if a; then b; fi 1", 17);
+    assert_syntax_error("(a){fd}", 3);
+    assert_eq!(
+        sexp("(a)1>f"),
+        "(subshell (command (word \"a\"))) (redirect \">\" \"f\")"
+    );
+}

@@ -133,21 +133,23 @@ impl Parser {
             } else {
                 let tok = self.lexer.peek_token()?;
                 if tok.kind == TokenType::Word || tok.kind == TokenType::Number {
+                    // The fd prefix is consumed to look past it; a word after a
+                    // compound command is a syntax error, never droppable text.
                     if is_fd_number(&tok.value) {
                         let tok = self.lexer.next_token()?;
-                        if self.is_redirect_operator()? {
-                            redirects.push(self.parse_redirect_with_fd(&tok)?);
-                            continue;
+                        if !self.is_redirect_operator()? {
+                            return Err(unexpected_word(&tok));
                         }
-                        break;
+                        redirects.push(self.parse_redirect_with_fd(&tok)?);
+                        continue;
                     }
                     if is_varfd(&tok.value) {
                         let varfd_tok = self.lexer.next_token()?;
-                        if self.is_redirect_operator()? {
-                            redirects.push(self.parse_redirect_with_varfd(&varfd_tok)?);
-                            continue;
+                        if !self.is_redirect_operator()? {
+                            return Err(unexpected_word(&varfd_tok));
                         }
-                        break;
+                        redirects.push(self.parse_redirect_with_varfd(&varfd_tok)?);
+                        continue;
                     }
                 }
                 break;
@@ -169,4 +171,12 @@ impl Parser {
         let tok = self.lexer.peek_token()?;
         Ok(is_redirect_op_kind(tok.kind))
     }
+}
+
+fn unexpected_word(tok: &Token) -> RableError {
+    RableError::parse(
+        format!("syntax error near unexpected token '{}'", tok.value),
+        tok.pos,
+        tok.line,
+    )
 }
