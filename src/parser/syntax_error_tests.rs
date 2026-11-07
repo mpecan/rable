@@ -124,13 +124,36 @@ fn stray_close_paren() {
 
 #[test]
 fn bare_negation_and_time_are_valid() {
-    // bash accepts `!` and `time` without a pipeline; the bash-oracle
-    // corpus pins these as `(negation (command))` / `(time (command))`.
-    assert_eq!(
-        sexp("x && ! && y"),
-        r#"(and (and (command (word "x")) (negation (command))) (command (word "y")))"#
-    );
+    // bash accepts `!` and `time` without a pipeline when a list
+    // terminator follows: `;`, `&`, a newline or end of input. The
+    // bash-oracle corpus pins these as `(negation (command))` /
+    // `(time (command))`.
     assert_eq!(sexp("time"), "(time (command))");
+    assert_eq!(
+        sexp("x && !"),
+        r#"(and (command (word "x")) (negation (command)))"#
+    );
+    assert_eq!(
+        sexp("! ; x"),
+        r#"(semi (negation (command)) (command (word "x")))"#
+    );
+    assert_eq!(sexp("! &"), "(background (negation (command)))");
+    assert_eq!(
+        sexp("{ x && !; }"),
+        r#"(brace-group (and (command (word "x")) (negation (command))))"#
+    );
+}
+
+#[test]
+fn bare_negation_and_time_need_a_list_terminator() {
+    assert_syntax_error("! && true", 2);
+    assert_syntax_error("x && ! && y", 7);
+    assert_syntax_error("x || time || y", 10);
+    assert_syntax_error("time -p && x", 8);
+    assert_syntax_error("x && ! | y", 7);
+    assert_syntax_error("{ x; ! }", 7);
+    assert_syntax_error("( ! )", 4);
+    assert_syntax_error("case x in a) ! ;; esac", 15);
 }
 
 #[test]
@@ -385,5 +408,24 @@ fn function_body_must_be_compound() {
     assert_eq!(
         sexp("function f (( x ))"),
         "(function \"f\" (arith (word \" x \")))"
+    );
+}
+
+#[test]
+fn time_options_then_a_command() {
+    // After `-p` / `--` a command follows, so reserved words count again.
+    assert_eq!(
+        sexp("time -p ! a"),
+        r#"(negation (time -p (command (word "a"))))"#
+    );
+    assert_eq!(
+        sexp("time -p { a; }"),
+        r#"(time -p (brace-group (command (word "a"))))"#
+    );
+    // bash reports `time --` in its POSIX form and consumes one `--`.
+    assert_eq!(sexp("time -- a"), r#"(time -p (command (word "a")))"#);
+    assert_eq!(
+        sexp("time -p -- -- a"),
+        r#"(time -p (command (word "--") (word "a")))"#
     );
 }
