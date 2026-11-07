@@ -71,22 +71,15 @@ impl Formatter {
             }
             self.format_redirect_inline(r);
         }
-        // Phase 2: concatenate heredoc bodies in source order after the
-        // command line. Exactly one `\n` separates the command line from
-        // the first body; consecutive bodies have none between them
-        // (each body already ends with its delimiter's trailing `\n`).
-        let mut first_heredoc = true;
+        // Phase 2: queue the heredoc bodies in source order. They are
+        // written after the command line by the next write, or after the
+        // operator of a following connector (see `write_before_heredocs`).
         for r in redirects {
             if let NodeKind::HereDoc {
                 delimiter, content, ..
             } = &r.kind
             {
-                if first_heredoc {
-                    self.mark_heredoc_bodies();
-                    self.write_char('\n');
-                    first_heredoc = false;
-                }
-                self.write_heredoc_body(content, delimiter);
+                self.defer_heredoc(content, delimiter);
             }
         }
     }

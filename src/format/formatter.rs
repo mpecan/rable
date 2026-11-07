@@ -10,12 +10,14 @@
 pub(super) struct Formatter {
     out: String,
     indent: usize,
-    /// Offset of the newline that starts the most recent command's
-    /// heredoc bodies: where a following list operator is spliced in.
-    heredoc_bodies_at: Option<usize>,
-    /// End offset of a space written after heredoc bodies. Bash keeps it
-    /// before the closing `)` (`$(cat <<E &\nx\nE\n )`), so `finish`
-    /// must not trim it.
+    /// Heredoc bodies (content + delimiter + `\n`) of the last command,
+    /// not yet written. As in bash's `print_deferred_heredocs`, the next
+    /// write flushes them, except that a connector writes its operator
+    /// first (`a <<E && b` → `a <<E && \nx\nE\n b`).
+    pending_heredocs: Vec<String>,
+    /// End offset of a space bash keeps at the very end, e.g. after
+    /// heredoc bodies (`$(cat <<E &\nx\nE\n )`) or a bare `!` (`$(! )`),
+    /// so `finish` must not trim it.
     kept_space_end: Option<usize>,
 }
 
@@ -24,7 +26,7 @@ impl Formatter {
         Self {
             out: String::new(),
             indent: 0,
-            heredoc_bodies_at: None,
+            pending_heredocs: Vec::new(),
             kept_space_end: None,
         }
     }
@@ -33,6 +35,7 @@ impl Formatter {
     /// spaces and tabs but **not** newlines — heredoc bodies end in
     /// `\n` and that terminator must survive.
     pub(super) fn finish(mut self) -> String {
+        self.flush_heredocs();
         if self.kept_space_end == Some(self.out.len()) {
             return self.out;
         }
@@ -41,16 +44,21 @@ impl Formatter {
         self.out
     }
 
+    /// Writes `s`, after any pending heredoc bodies.
     pub(super) fn write_str(&mut self, s: &str) {
+        self.flush_heredocs();
         self.out.push_str(s);
     }
 
+    /// Writes `c`, after any pending heredoc bodies.
     pub(super) fn write_char(&mut self, c: char) {
+        self.flush_heredocs();
         self.out.push(c);
     }
 
     /// Write `n` spaces at the current position.
     pub(super) fn write_indent(&mut self, n: usize) {
+        self.flush_heredocs();
         for _ in 0..n {
             self.out.push(' ');
         }
@@ -69,28 +77,49 @@ impl Formatter {
         self.indent -= delta;
     }
 
-    /// Records that the current command's heredoc bodies start here
-    /// (just before the newline that ends its command line).
-    pub(super) const fn mark_heredoc_bodies(&mut self) {
-        self.heredoc_bodies_at = Some(self.out.len());
+    /// Queues a heredoc body for the next flush.
+    pub(super) fn defer_heredoc(&mut self, content: &str, delimiter: &str) {
+        self.pending_heredocs
+            .push(format!("{content}{delimiter}\n"));
     }
 
-    /// Takes the offset recorded by [`Self::mark_heredoc_bodies`].
-    pub(super) const fn take_heredoc_bodies_at(&mut self) -> Option<usize> {
-        self.heredoc_bodies_at.take()
+    /// Whether heredoc bodies are waiting to be written.
+    pub(super) const fn has_pending_heredocs(&self) -> bool {
+        !self.pending_heredocs.is_empty()
+    }
+
+    /// Writes a connector's operator ahead of the pending heredoc bodies,
+    /// then the bodies and the space bash prints after them, which is
+    /// kept even at the end (`$(a <<E &\nx\nE\n )`). Returns whether
+    /// there were bodies.
+    pub(super) fn write_before_heredocs(&mut self, op: &str) -> bool {
+        self.out.push_str(op);
+        let flushed = self.flush_heredocs();
+        if flushed {
+            self.out.push(' ');
+            self.kept_space_end = Some(self.out.len());
+        }
+        flushed
+    }
+
+    /// Writes the pending heredoc bodies: one `\n` ends the command line,
+    /// then each body in source order. Returns whether there were any.
+    fn flush_heredocs(&mut self) -> bool {
+        if self.pending_heredocs.is_empty() {
+            return false;
+        }
+        self.out.push('\n');
+        for body in self.pending_heredocs.drain(..) {
+            self.out.push_str(&body);
+        }
+        true
     }
 
     /// Writes a single space that `finish` keeps even at the very end.
     pub(super) fn write_kept_space(&mut self) {
+        self.flush_heredocs();
         self.out.push(' ');
         self.kept_space_end = Some(self.out.len());
-    }
-
-    /// Splice `s` into the output at byte offset `pos`. Used to put a
-    /// list operator on a heredoc's delimiter line after its bodies were
-    /// written.
-    pub(super) fn insert_at(&mut self, pos: usize, s: &str) {
-        self.out.insert_str(pos, s);
     }
 }
 

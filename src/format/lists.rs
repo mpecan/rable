@@ -4,12 +4,9 @@
 use crate::ast::{ListItem, ListOperator};
 
 use super::formatter::Formatter;
-use super::redirects::has_heredoc_redirect_deep;
 
 /// Returns the canonical surface syntax for a list operator, with
-/// surrounding spaces as bash's canonical form prescribes. Shared
-/// between `write_list_op` and the heredoc splice in
-/// `write_op_around_heredoc`.
+/// surrounding spaces as bash's canonical form prescribes.
 pub(super) const fn list_op_str(op: ListOperator) -> &'static str {
     match op {
         ListOperator::And => " && ",
@@ -28,59 +25,44 @@ impl Formatter {
     pub(super) fn format_list(&mut self, items: &[ListItem]) {
         for (i, item) in items.iter().enumerate() {
             if i > 0 {
-                // Write the operator from the *previous* item
-                if let Some(op) = items[i - 1].operator {
-                    let has_heredoc = has_heredoc_redirect_deep(&items[i - 1].command);
-                    if op == ListOperator::Semi && has_heredoc {
-                        self.write_char('\n');
-                    } else if has_heredoc {
-                        self.write_op_around_heredoc(op, true);
-                    } else {
-                        self.write_list_op(op);
-                    }
-                } else {
-                    self.write_str("; ");
+                match items[i - 1].operator {
+                    Some(op) => self.write_list_connector(op),
+                    None => self.write_str("; "),
                 }
             }
-            self.take_heredoc_bodies_at();
             self.format_node(&item.command);
         }
-        // Write trailing operator on the last item (e.g., `cmd &`)
-        if let Some(last) = items.last()
-            && let Some(op) = last.operator
-        {
-            if has_heredoc_redirect_deep(&last.command) {
-                self.write_op_around_heredoc(op, false);
-            } else {
-                self.write_list_op(op);
+        // Trailing operator on the last item (e.g., `cmd &`)
+        if let Some(op) = items.last().and_then(|item| item.operator) {
+            self.write_trailing_list_op(op);
+        }
+    }
+
+    /// Writes the operator between two list items. As bash's
+    /// `print_deferred_heredocs` does, the operator comes before any
+    /// pending heredoc bodies and a space follows them, two after `&`:
+    /// `a <<E && b` → `a <<E && \nx\nE\n b`.
+    fn write_list_connector(&mut self, op: ListOperator) {
+        match op {
+            ListOperator::Semi if self.has_pending_heredocs() => self.write_char('\n'),
+            ListOperator::Semi => self.write_list_op(op),
+            ListOperator::Background => {
+                self.write_before_heredocs(" &");
+                self.write_char(' ');
+            }
+            ListOperator::And | ListOperator::Or => {
+                self.write_before_heredocs(list_op_str(op));
             }
         }
     }
 
-    /// Writes a list operator after a command whose heredoc bodies are
-    /// already in the output, as bash's `print_deferred_heredocs` does:
-    /// the operator goes on the delimiter line, and a space follows the
-    /// bodies — two after `&` when a command follows. So `a <<E && b`
-    /// becomes `a <<E && \nx\nE\n b`, and a trailing `cmd <<E &` ends in
-    /// `E\n ` (bash's `$(… )`). A trailing `;` prints nothing.
-    fn write_op_around_heredoc(&mut self, op: ListOperator, has_next: bool) {
-        if op == ListOperator::Semi {
-            return;
-        }
-        let Some(at) = self.take_heredoc_bodies_at() else {
+    /// Writes the last item's operator. After heredoc bodies `&` keeps
+    /// bash's space (`$(cmd <<E &\nx\nE\n )`) and `;` prints nothing.
+    fn write_trailing_list_op(&mut self, op: ListOperator) {
+        if !self.has_pending_heredocs() {
             self.write_list_op(op);
-            return;
-        };
-        let text = if op == ListOperator::Background {
-            " &"
-        } else {
-            list_op_str(op)
-        };
-        self.insert_at(at, text);
-        match (has_next, op) {
-            (true, ListOperator::Background) => self.write_str("  "),
-            (true, _) => self.write_char(' '),
-            (false, _) => self.write_kept_space(),
+        } else if op != ListOperator::Semi {
+            self.write_before_heredocs(list_op_str(op).trim_end());
         }
     }
 
