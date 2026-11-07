@@ -141,6 +141,43 @@ impl TokenType {
     }
 }
 
+impl TokenType {
+    /// True for tokens that can stand as a plain WORD where the grammar
+    /// requires one (redirect targets, case patterns, `for … in` lists).
+    /// Reserved words qualify — `for i in if fi` is valid bash — but
+    /// operators, newlines and end of input never do.
+    pub const fn is_word_like(self) -> bool {
+        matches!(
+            self,
+            Self::Word
+                | Self::AssignmentWord
+                | Self::Number
+                | Self::Bang
+                | Self::LeftBrace
+                | Self::RightBrace
+                | Self::DoubleLeftBracket
+                | Self::DoubleRightBracket
+                | Self::If
+                | Self::Then
+                | Self::Else
+                | Self::Elif
+                | Self::Fi
+                | Self::Do
+                | Self::Done
+                | Self::Case
+                | Self::Esac
+                | Self::While
+                | Self::Until
+                | Self::For
+                | Self::Select
+                | Self::In
+                | Self::Function
+                | Self::Time
+                | Self::Coproc
+        )
+    }
+}
+
 use crate::lexer::word_builder::WordSpan;
 
 /// A token produced by the lexer.

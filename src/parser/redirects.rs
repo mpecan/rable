@@ -6,10 +6,10 @@ use crate::error::{RableError, Result};
 use crate::lexer::heredoc::parse_heredoc_delimiter;
 use crate::token::{Token, TokenType};
 
-use super::Parser;
 use super::helpers::{
     is_fd_number, is_redirect_op_kind, is_varfd, word_node, word_node_from_token,
 };
+use super::{Parser, unexpected_token};
 
 impl Parser {
     pub(super) fn parse_redirect(&mut self) -> Result<Node> {
@@ -64,7 +64,7 @@ impl Parser {
             ));
         }
 
-        let target_tok = self.lexer.next_token()?;
+        let target_tok = self.expect_word()?;
         let is_dup = op_tok.kind == TokenType::GreaterAnd || op_tok.kind == TokenType::LessAnd;
 
         if is_dup && target_tok.value == "-" {
@@ -104,7 +104,7 @@ impl Parser {
 
     fn build_heredoc_redirect(&mut self, op_tok: &Token, fd: i32) -> Result<Node> {
         let start = op_tok.pos;
-        let delim_tok = self.lexer.next_token()?;
+        let delim_tok = self.expect_word()?;
         let strip_tabs = op_tok.kind == TokenType::DoubleLessDash;
         let (delimiter, quoted) = parse_heredoc_delimiter(&delim_tok.value);
         self.lexer
@@ -138,7 +138,7 @@ impl Parser {
                     if is_fd_number(&tok.value) {
                         let tok = self.lexer.next_token()?;
                         if !self.is_redirect_operator()? {
-                            return Err(unexpected_word(&tok));
+                            return Err(unexpected_token(&tok));
                         }
                         redirects.push(self.parse_redirect_with_fd(&tok)?);
                         continue;
@@ -146,7 +146,7 @@ impl Parser {
                     if is_varfd(&tok.value) {
                         let varfd_tok = self.lexer.next_token()?;
                         if !self.is_redirect_operator()? {
-                            return Err(unexpected_word(&varfd_tok));
+                            return Err(unexpected_token(&varfd_tok));
                         }
                         redirects.push(self.parse_redirect_with_varfd(&varfd_tok)?);
                         continue;
@@ -171,12 +171,4 @@ impl Parser {
         let tok = self.lexer.peek_token()?;
         Ok(is_redirect_op_kind(tok.kind))
     }
-}
-
-fn unexpected_word(tok: &Token) -> RableError {
-    RableError::parse(
-        format!("syntax error near unexpected token '{}'", tok.value),
-        tok.pos,
-        tok.line,
-    )
 }

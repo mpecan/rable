@@ -221,3 +221,42 @@ fn fd_number_after_compound_is_not_dropped() {
         "(subshell (command (word \"a\"))) (redirect \">\" \"f\")"
     );
 }
+
+// -- WORD required by the grammar ------------------------------------------
+
+#[test]
+fn redirect_target_must_be_a_word() {
+    assert_syntax_error("f>", 2);
+    assert_syntax_error("cmd >;", 5);
+    assert_syntax_error("cmd> &-", 5);
+    assert_syntax_error("cat <<", 6);
+    assert_eq!(
+        sexp("echo > if"),
+        "(command (word \"echo\") (redirect \">\" \"if\"))"
+    );
+}
+
+#[test]
+fn case_pattern_is_words_separated_by_pipes() {
+    assert_syntax_error("case $x in a||q) :;; esac", 12);
+    assert_syntax_error("case $x in do a) :;; esac", 14);
+    assert_syntax_error("case $x in ) :;; esac", 11);
+    assert_syntax_error("case x in a\n) :;; esac", 11);
+    assert_eq!(
+        sexp("case x in (a | b) :;; esac"),
+        "(case (word \"x\") (pattern ((word \"a\") (word \"b\")) (command (word \":\"))))"
+    );
+    assert_eq!(
+        sexp("case x in if|esac) :;; esac"),
+        "(case (word \"x\") (pattern ((word \"if\") (word \"esac\")) (command (word \":\"))))"
+    );
+}
+
+#[test]
+fn for_in_list_rejects_operators() {
+    assert_syntax_error("for i in 1 2|| 3; do :; done", 12);
+    assert_eq!(
+        sexp("for i in if then fi; do :; done"),
+        "(for (word \"i\") (in (word \"if\") (word \"then\") (word \"fi\")) (command (word \":\")))"
+    );
+}

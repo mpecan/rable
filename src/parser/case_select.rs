@@ -4,9 +4,9 @@ use crate::ast::{CasePattern, Node, NodeKind, Span};
 use crate::error::Result;
 use crate::token::TokenType;
 
-use super::Parser;
 use super::helpers::{word_node, word_node_from_token};
 use super::word_parts;
+use super::{Parser, unexpected_token};
 
 impl Parser {
     pub(super) fn parse_case(&mut self) -> Result<Node> {
@@ -54,16 +54,16 @@ impl Parser {
             self.lexer.next_token()?;
         }
 
+        // pattern := word ( '|' word )* ')'
         let mut pattern_words = Vec::new();
         loop {
-            let tok = self.lexer.next_token()?;
-            if tok.kind == TokenType::RightParen || tok.kind == TokenType::Eof {
-                break;
+            pattern_words.push(word_node_from_token(self.expect_word()?));
+            let sep = self.lexer.next_token()?;
+            match sep.kind {
+                TokenType::Pipe => {}
+                TokenType::RightParen => break,
+                _ => return Err(unexpected_token(&sep)),
             }
-            if tok.kind == TokenType::Pipe {
-                continue;
-            }
-            pattern_words.push(word_node_from_token(tok));
         }
 
         self.skip_newlines()?;
