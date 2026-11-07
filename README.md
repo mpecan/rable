@@ -8,13 +8,13 @@
 
 **A complete GNU Bash 5.3-compatible parser, written in Rust.**
 
-Rable is a from-scratch reimplementation of [Parable](https://github.com/ldayton/Parable) — the excellent Python-based bash parser by [@ldayton](https://github.com/ldayton). It produces identical S-expression output and provides a drop-in replacement Python API via [PyO3](https://pyo3.rs).
+Rable is a from-scratch reimplementation of [Parable](https://github.com/ldayton/Parable) — the excellent Python-based bash parser by [@ldayton](https://github.com/ldayton). It produces the same S-expression format and provides a drop-in replacement Python API via [PyO3](https://pyo3.rs). Where Parable and bash itself disagree, Rable follows bash, checked with [bash-oracle](https://github.com/ldayton/bash-oracle).
 
 ## Acknowledgments
 
 **This project would not exist without [Parable](https://github.com/ldayton/Parable).**
 
-Parable is a remarkable piece of work — a complete, well-tested bash parser that produces clean S-expression AST output validated against bash's own internal parser. Its comprehensive test suite (1,604 tests across 36 files) defines the gold standard for bash parsing correctness, and Rable's compatibility is measured entirely against it.
+Parable is a remarkable piece of work — a complete, well-tested bash parser that produces clean S-expression AST output validated against bash's own internal parser. Its comprehensive test suite (1,604 tests across 36 files) is the core of Rable's own test suite.
 
 We are deeply grateful to [@ldayton](https://github.com/ldayton) for:
 - Building a high-quality, MIT-licensed bash parser that others can learn from and build upon
@@ -28,9 +28,9 @@ Rable exists because Parable showed the way. Thank you.
 
 | Metric | Value |
 |---|---|
-| Parable test compatibility | **1,604 / 1,604 (100%)** |
+| Parable test corpus | **1,604 / 1,604 (100%)** |
 | Test files at 100% | **36 / 36** |
-| S-expression output | Identical to Parable |
+| S-expression output | Parable's format; matches bash-oracle on every corpus input |
 | Minimum Rust version | 1.93 |
 | Python version | 3.12+ |
 
@@ -175,7 +175,7 @@ use rable::{Node, NodeKind, Span};
 | **Conditionals** | `ConditionalExpr`, `UnaryTest`, `BinaryTest`, `CondAnd`, `CondOr`, `CondNot` |
 | **Other** | `Negation`, `Time`, `Array`, `Comment`, `Empty` |
 
-Every node implements `Display`, producing S-expression output identical to Parable.
+Every node implements `Display`, producing S-expression output in Parable's format.
 
 ### Error Types
 
@@ -214,7 +214,7 @@ Source string
 
 ### Design principles
 
-1. **Compatibility is correctness** — output matches Parable's S-expressions exactly
+1. **Compatibility is correctness** — output matches bash-oracle's S-expressions exactly; where Parable disagrees, bash wins
 2. **If it is not tested, it is not shipped** — 1,604 integration tests + unit tests
 3. **Simplicity is king** — solve problems with least complexity
 4. **Correctness over speed** — match bash-oracle behavior, optimize later
@@ -292,6 +292,8 @@ bash source code
 ---
 ```
 
+Where upstream Parable's expectation differs from bash-oracle, the case expects bash's output instead and is marked `# Diverges from upstream Parable`.
+
 There are 36 test files covering words, commands, pipelines, lists, redirects, compound statements, loops, functions, expansions, arithmetic, here-documents, process substitution, conditionals, arrays, and more.
 
 ### Oracle tests
@@ -304,7 +306,7 @@ just test-oracle
 
 ### Differential fuzzing
 
-The fuzzer (`tests/fuzz.py`) compares Rable's output against Parable on randomly generated or mutated bash inputs, catching edge-case divergences:
+The fuzzer (`tests/fuzz.py`) compares Rable's output against bash-oracle (or Parable, if bash-oracle isn't built) on randomly generated or mutated bash inputs, catching edge-case divergences:
 
 ```bash
 just setup               # one-time: set up Python environment
