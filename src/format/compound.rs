@@ -276,27 +276,21 @@ impl Formatter {
         let NodeKind::Negation { pipeline } = &node.kind else {
             return;
         };
-        if let NodeKind::Time { pipeline, posix } = &pipeline.kind {
-            self.write_time_keyword(*posix);
-            self.write_prefix_then(pipeline, "!");
+        let negated = if let NodeKind::Time { pipeline, posix } = &pipeline.kind {
+            self.write_str(time_keyword(*posix));
+            self.write_char(' ');
+            pipeline
         } else {
-            self.write_prefix_then(pipeline, "!");
-        }
+            pipeline
+        };
+        self.write_prefix_then(negated, "!");
     }
 
     pub(super) fn format_time(&mut self, node: &Node) {
         let NodeKind::Time { pipeline, posix } = &node.kind else {
             return;
         };
-        if *posix {
-            self.write_prefix_then(pipeline, "time -p");
-        } else {
-            self.write_prefix_then(pipeline, "time");
-        }
-    }
-
-    fn write_time_keyword(&mut self, posix: bool) {
-        self.write_str(if posix { "time -p " } else { "time " });
+        self.write_prefix_then(pipeline, time_keyword(*posix));
     }
 
     /// Writes `prefix` and a space, then `pipeline`. For a bare `!` or
@@ -331,4 +325,8 @@ impl Formatter {
         self.format_cond_node(body);
         self.write_str(" ]]");
     }
+}
+
+const fn time_keyword(posix: bool) -> &'static str {
+    if posix { "time -p" } else { "time" }
 }

@@ -2,7 +2,7 @@
 //! and/or (`&&`/`||`), and pipelines (`|`/`|&`, plus `!` and `time`).
 
 use crate::ast::{ListItem, ListOperator, Node, NodeKind, PipeSep, Span};
-use crate::error::{RableError, Result};
+use crate::error::Result;
 use crate::lexer::LexerMode;
 use crate::token::TokenType;
 
@@ -333,13 +333,7 @@ impl Parser {
         if !node.is_some_and(|n| matches!(n.kind, NodeKind::Empty)) {
             return Ok(());
         }
-        let tok = self.lexer.peek_token()?;
-        let message = if tok.kind == TokenType::Eof {
-            "syntax error: unexpected end of input".to_string()
-        } else {
-            format!("syntax error near unexpected token '{}'", tok.value)
-        };
-        Err(RableError::parse(message, tok.pos, tok.line))
+        Err(unexpected_token(self.lexer.peek_token()?))
     }
 
     fn check_word(&mut self, expected: &str) -> Result<bool> {

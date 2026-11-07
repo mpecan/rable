@@ -49,28 +49,7 @@ pub(super) fn cond_term_from_token(tok: Token) -> Node {
     })
 }
 
-/// Returns true if the string is a valid file descriptor number: all
-/// digits and within `i32` range, as bash accepts any `int` fd prefix
-/// (`100>file`, `007<in`); larger numbers stay ordinary words.
-pub(super) fn is_fd_number(s: &str) -> bool {
-    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) && s.parse::<i32>().is_ok()
-}
-
-/// Returns true if the string is a variable fd reference like `{varname}`.
-/// Requires valid bash variable name: starts with letter or `_`, then
-/// alphanumeric or `_`.
-pub(super) fn is_varfd(s: &str) -> bool {
-    s.starts_with('{')
-        && s.ends_with('}')
-        && s.len() >= 3
-        // First char must be letter or underscore (valid variable name start)
-        && s.as_bytes()
-            .get(1)
-            .is_some_and(|&c| c.is_ascii_alphabetic() || c == b'_')
-        && s[1..s.len() - 1]
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
+pub(super) use crate::lexer::{is_fd_number, is_varfd};
 
 /// Returns true if the string is a conditional binary operator.
 pub(super) fn is_cond_binary_op(s: &str) -> bool {

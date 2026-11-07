@@ -120,8 +120,22 @@ impl TokenType {
         }
     }
 
-    /// Returns true if this token type starts a compound command.
+    /// Returns true if this token type starts a command other than a
+    /// simple command: a compound command, a function definition,
+    /// `coproc`, or a `!` / `time` prefix.
     pub const fn starts_command(self) -> bool {
+        self.starts_compound_command()
+            || matches!(
+                self,
+                Self::Function | Self::Coproc | Self::Bang | Self::Time
+            )
+    }
+
+    /// Returns true if this token type starts a compound command — bash's
+    /// `shell_command`: `{ }`, `( )`, `(( ))`, `[[ ]]`, `if`, `for`,
+    /// `while`, `until`, `case` or `select`. Only these may be a function
+    /// body.
+    pub const fn starts_compound_command(self) -> bool {
         matches!(
             self,
             Self::If
@@ -132,27 +146,23 @@ impl TokenType {
                 | Self::Select
                 | Self::LeftParen
                 | Self::LeftBrace
-                | Self::Function
-                | Self::Coproc
                 | Self::DoubleLeftBracket
-                | Self::Bang
-                | Self::Time
         )
     }
-}
 
-impl TokenType {
     /// True for tokens that can stand as a plain WORD where the grammar
     /// requires one (redirect targets, case patterns, `for … in` lists).
     /// Reserved words qualify — `for i in if fi` is valid bash — but
     /// operators, newlines and end of input never do.
     pub const fn is_word_like(self) -> bool {
+        matches!(self, Self::Word | Self::AssignmentWord | Self::Number) || self.is_reserved_word()
+    }
+
+    /// True for the token kinds [`Self::reserved_word`] produces.
+    pub const fn is_reserved_word(self) -> bool {
         matches!(
             self,
-            Self::Word
-                | Self::AssignmentWord
-                | Self::Number
-                | Self::Bang
+            Self::Bang
                 | Self::LeftBrace
                 | Self::RightBrace
                 | Self::DoubleLeftBracket

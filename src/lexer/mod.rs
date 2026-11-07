@@ -34,6 +34,7 @@ mod word_span_tests;
 
 pub(crate) use context::LexerContext;
 pub(crate) use heredoc::PendingHereDoc;
+pub(crate) use words::{is_fd_number, is_varfd};
 
 /// Immutable lexer configuration set at construction time.
 #[derive(Debug, Clone, Copy)]
@@ -116,7 +117,8 @@ impl Lexer {
 
     /// Signal that the next word position is a command start. Also
     /// re-arms reserved-word recognition — a fresh command is always
-    /// allowed to begin with a reserved word.
+    /// allowed to begin with a reserved word — and forgets the previous
+    /// command's words.
     pub(crate) const fn set_command_start(&mut self) {
         self.ctx.command_start = true;
         self.ctx.command_has_word = false;
@@ -310,21 +312,6 @@ impl Lexer {
         }
     }
 
-    /// Returns the next token with extended patterns recognised whatever
-    /// the extglob setting: bash enables them for the pattern operand of
-    /// `==`, `=` and `!=` in `[[ … ]]` (`[[ x == @(a|b) ]]`).
-    ///
-    /// # Errors
-    ///
-    /// Returns `RableError` on unterminated quotes or unexpected input.
-    pub(crate) fn next_pattern_token(&mut self) -> Result<Token> {
-        let extglob = self.config.extglob;
-        self.config.extglob = true;
-        let tok = self.next_token();
-        self.config.extglob = extglob;
-        tok
-    }
-
     /// Returns the next token, consuming it.
     ///
     /// # Errors
@@ -390,9 +377,7 @@ impl Lexer {
         match ch {
             '\n' => {
                 self.advance_char();
-                self.ctx.command_start = true;
-                self.ctx.reserved_words_ok = true;
-                self.ctx.command_has_word = false;
+                self.set_command_start();
                 self.ctx.redirect_target = false;
                 // Read any pending here-documents after the newline
                 if !self.pending_heredocs.is_empty() {

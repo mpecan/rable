@@ -1,4 +1,5 @@
-//! The right-hand side of `=~` inside `[[ … ]]`.
+//! Operands the conditional parser reads in a special mode: the
+//! right-hand side of `=~`, and the pattern after `==`, `=` or `!=`.
 //!
 //! Bash lexes the regex operand in a special mode (`PST_REGEXP`): `(` and
 //! `)` are regex grouping, not shell metacharacters, and inside a group
@@ -12,6 +13,21 @@ use super::Lexer;
 use super::word_builder::WordBuilder;
 
 impl Lexer {
+    /// Returns the next token with extended patterns recognised whatever
+    /// the extglob setting: bash enables them for the pattern operand of
+    /// `==`, `=` and `!=` in `[[ … ]]` (`[[ x == @(a|b) ]]`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `RableError` on unterminated quotes or unexpected input.
+    pub(crate) fn next_pattern_token(&mut self) -> Result<Token> {
+        let extglob = self.config.extglob;
+        self.config.extglob = true;
+        let tok = self.next_token();
+        self.config.extglob = extglob;
+        tok
+    }
+
     /// Reads the regex operand following `=~` as a single `Word` token.
     ///
     /// Outside any group the word ends at a blank, a `)` that closes no

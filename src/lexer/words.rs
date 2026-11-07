@@ -56,7 +56,9 @@ impl Lexer {
         }
 
         let kind = self.classify_word(&wb);
-        let fd_prefix = is_fd_prefix(&wb.value) && matches!(self.peek_char(), Some('<' | '>'));
+        // A redirect fd prefix: `2>`, `{fd}>`.
+        let fd_prefix = matches!(self.peek_char(), Some('<' | '>'))
+            && (is_fd_number(&wb.value) || is_varfd(&wb.value));
         self.advance_word_context(kind, &wb.value, fd_prefix);
         Ok(Token::with_spans(kind, wb.value, start, line, wb.spans))
     }
@@ -410,11 +412,25 @@ fn is_identifier_prefix(value: &str) -> bool {
         .all(|b| matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_'))
 }
 
-/// Returns true if a word value matches the assignment pattern `NAME=`,
-/// `NAME+=`, or `NAME[...]=` / `NAME[...]+=`.
-/// A redirect fd prefix: digits (`2>`) or a `{name}` variable fd (`{fd}>`).
-fn is_fd_prefix(value: &str) -> bool {
-    let all_digits = !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit());
-    let varfd = value.len() > 2 && value.starts_with('{') && value.ends_with('}');
-    all_digits || varfd
+/// Returns true if the string is a valid file descriptor number: all
+/// digits and within `i32` range, as bash accepts any `int` fd prefix
+/// (`100>file`, `007<in`); larger numbers stay ordinary words.
+pub(crate) fn is_fd_number(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) && s.parse::<i32>().is_ok()
+}
+
+/// Returns true if the string is a variable fd reference like `{varname}`.
+/// Requires valid bash variable name: starts with letter or `_`, then
+/// alphanumeric or `_`.
+pub(crate) fn is_varfd(s: &str) -> bool {
+    s.starts_with('{')
+        && s.ends_with('}')
+        && s.len() >= 3
+        // First char must be letter or underscore (valid variable name start)
+        && s.as_bytes()
+            .get(1)
+            .is_some_and(|&c| c.is_ascii_alphabetic() || c == b'_')
+        && s[1..s.len() - 1]
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
 }

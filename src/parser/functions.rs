@@ -113,18 +113,7 @@ impl Parser {
     /// command: `f() echo`, `f()` and `f() g() { …; }` are syntax errors.
     fn parse_function_body(&mut self) -> Result<Node> {
         let tok = self.lexer.peek_token()?;
-        if !matches!(
-            tok.kind,
-            TokenType::LeftBrace
-                | TokenType::LeftParen
-                | TokenType::DoubleLeftBracket
-                | TokenType::If
-                | TokenType::For
-                | TokenType::While
-                | TokenType::Until
-                | TokenType::Case
-                | TokenType::Select
-        ) {
+        if !tok.kind.starts_compound_command() {
             return Err(unexpected_token(tok));
         }
         self.parse_command()
@@ -276,8 +265,9 @@ impl Parser {
 }
 
 /// Returns true when `kind` can start a command at the body position of a
-/// `coproc` clause. Excludes `coproc`, `time`, and `!` since they would
-/// cause re-entry into `parse_coproc` or ambiguous negation.
+/// `coproc` clause: a compound command or a function definition. Not
+/// `coproc`, `time` or `!`, which would re-enter `parse_coproc` or make
+/// the negation ambiguous.
 const fn coproc_starts_command(kind: TokenType) -> bool {
-    kind.starts_command() && !matches!(kind, TokenType::Coproc | TokenType::Time | TokenType::Bang)
+    kind.starts_compound_command() || matches!(kind, TokenType::Function)
 }
