@@ -5,9 +5,11 @@ use std::rc::Rc;
 use crate::error::{RableError, Result};
 use crate::token::{Token, TokenType};
 
+mod assignment;
 mod backtick;
 mod brace_expansion;
 mod cond_regex;
+mod context;
 mod expansions;
 pub(crate) mod heredoc;
 mod operators;
@@ -30,6 +32,7 @@ mod tests;
 #[cfg(test)]
 mod word_span_tests;
 
+pub(crate) use context::LexerContext;
 pub(crate) use heredoc::PendingHereDoc;
 
 /// Immutable lexer configuration set at construction time.
@@ -37,33 +40,6 @@ pub(crate) use heredoc::PendingHereDoc;
 struct LexerConfig {
     /// Whether extended glob patterns `@()`, `?()`, `*()`, `+()`, `!()` are enabled.
     extglob: bool,
-}
-
-/// Mutable context flags the parser uses to inform the lexer.
-/// Private — the parser interacts via methods on `Lexer`.
-#[derive(Debug, Clone)]
-pub(crate) struct LexerContext {
-    /// At command start position — eligible to begin a new simple command
-    /// or to accept an `AssignmentWord`.
-    pub(crate) command_start: bool,
-    /// Reserved-word recognition is enabled. Distinct from `command_start`:
-    /// after a simple command has consumed one or more `AssignmentWord`s,
-    /// subsequent words must NOT be classified as reserved words, even
-    /// though we are still at command-word position. Re-armed whenever
-    /// `command_start` is re-armed (separators, newlines, etc.).
-    pub(crate) reserved_words_ok: bool,
-    /// Inside a `[[ ]]` conditional expression.
-    pub(crate) cond_expr: bool,
-}
-
-impl Default for LexerContext {
-    fn default() -> Self {
-        Self {
-            command_start: true,
-            reserved_words_ok: true,
-            cond_expr: false,
-        }
-    }
 }
 
 /// Hand-written context-sensitive lexer for bash.
