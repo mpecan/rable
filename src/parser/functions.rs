@@ -5,9 +5,9 @@ use crate::ast::{Node, NodeKind};
 use crate::error::Result;
 use crate::token::{Token, TokenType};
 
-use super::Parser;
 use super::arithmetic::parse_arith_expression;
 use super::helpers::{is_redirect_op_kind, word_node_from_token};
+use super::{Parser, unexpected_token};
 
 impl Parser {
     pub(super) fn parse_subshell(&mut self) -> Result<Node> {
@@ -47,11 +47,12 @@ impl Parser {
     pub(super) fn parse_function(&mut self) -> Result<Node> {
         let start = self.peek_pos()?;
         self.expect(TokenType::Function)?;
-        let name_tok = self.lexer.next_token()?;
+        let name_tok = self.expect_word()?;
         let name = name_tok.value;
 
         self.lexer.set_command_start();
-        if self.peek_is(TokenType::LeftParen)? {
+        // `function f (( x ))` has an arithmetic body, not a subshell.
+        if self.peek_is(TokenType::LeftParen)? && !self.is_double_paren()? {
             self.lexer.next_token()?;
             if self.peek_is(TokenType::RightParen)? {
                 // function f() { ... } — empty parens syntax
@@ -80,7 +81,7 @@ impl Parser {
         }
 
         self.skip_newlines()?;
-        let body = self.parse_command()?;
+        let body = self.parse_function_body()?;
 
         Ok(self.spanned(
             start,
@@ -97,7 +98,7 @@ impl Parser {
         self.expect(TokenType::RightParen)?;
         self.lexer.set_command_start();
         self.skip_newlines()?;
-        let body = self.parse_command()?;
+        let body = self.parse_function_body()?;
 
         Ok(self.spanned(
             start,
@@ -106,6 +107,27 @@ impl Parser {
                 body: Box::new(body),
             },
         ))
+    }
+
+    /// Parses a function body, which bash requires to be a compound
+    /// command: `f() echo`, `f()` and `f() g() { …; }` are syntax errors.
+    fn parse_function_body(&mut self) -> Result<Node> {
+        let tok = self.lexer.peek_token()?;
+        if !matches!(
+            tok.kind,
+            TokenType::LeftBrace
+                | TokenType::LeftParen
+                | TokenType::DoubleLeftBracket
+                | TokenType::If
+                | TokenType::For
+                | TokenType::While
+                | TokenType::Until
+                | TokenType::Case
+                | TokenType::Select
+        ) {
+            return Err(unexpected_token(tok));
+        }
+        self.parse_command()
     }
 
     pub(super) fn parse_coproc(&mut self) -> Result<Node> {

@@ -359,3 +359,31 @@ fn cond_pattern_operand_always_allows_extglob() {
          (cond-unary \"-f\" (cond-term \"b\")))))"
     );
 }
+
+// -- function bodies --------------------------------------------------------
+
+#[test]
+fn function_body_must_be_compound() {
+    assert_syntax_error("f() echo", 4);
+    assert_syntax_error("f()", 3);
+    assert_syntax_error("f() ;", 4);
+    assert_syntax_error("f() g() { :; }", 4);
+    assert_syntax_error("f() coproc { :; }", 4);
+    assert_syntax_error("f() ! { :; }", 4);
+    assert_syntax_error("function f echo", 11);
+    assert_syntax_error("function f", 10);
+    assert_syntax_error("function ; { :; }", 9);
+    for body in [
+        "( : )",
+        "((x))",
+        "[[ x ]]",
+        "if x; then :; fi",
+        "for x; do :; done",
+    ] {
+        assert!(try_parse(&format!("f() {body}")).is_ok(), "f() {body}");
+    }
+    assert_eq!(
+        sexp("function f (( x ))"),
+        "(function \"f\" (arith (word \" x \")))"
+    );
+}
