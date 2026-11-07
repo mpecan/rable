@@ -143,11 +143,11 @@ impl Parser {
 
         // Path B: `coproc <redir ...` — synthetic command starting with a
         // redirect. The redirect target must not be re-armed as a command
-        // start, so this check comes before `set_command_start`.
+        // start, so this check comes before `allow_command_after_word`.
         if is_redirect_op_kind(first_tok.kind) {
             return self.parse_coproc_redirect_first(start, first_tok);
         }
-        self.lexer.set_command_start();
+        self.lexer.allow_command_after_word();
 
         // Path C: `coproc NAME CMD` — named coproc, `first_tok` is the name.
         if coproc_starts_command(self.lexer.peek_token()?.kind) {
@@ -188,11 +188,9 @@ impl Parser {
         let mut words = Vec::new();
         let mut redirects = Vec::new();
         // `coproc 2>err cmd`: the first token may itself be an fd prefix.
-        if let Some(redirect) = self.try_parse_fd_redirect(&first_tok)? {
-            redirects.push(redirect);
-        } else {
-            self.lexer.mark_command_word();
-            words.push(word_node_from_token(first_tok));
+        match self.try_parse_fd_redirect(&first_tok)? {
+            Some(redirect) => redirects.push(redirect),
+            None => words.push(word_node_from_token(first_tok)),
         }
         self.collect_coproc_words(words, redirects)
     }
