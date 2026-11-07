@@ -353,13 +353,16 @@ echo $(echo bg &)
 ---
 
 
+# Diverges from upstream Parable, which expects no space before `)`.
+# bash-oracle is the reference: bash prints `&`, the heredoc body, then
+# a space (print_deferred_heredocs), giving `$(… )`.
 === backgrounded heredoc in cmdsub
 echo $(cat <<EOF &
 body
 EOF
 )
 ---
-(command (word "echo") (word "$(cat <<EOF &\nbody\nEOF\n)"))
+(command (word "echo") (word "$(cat <<EOF &\nbody\nEOF\n )"))
 ---
 
 

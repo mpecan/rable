@@ -178,12 +178,28 @@ mod tests {
     #[test]
     fn trailing_operator_lands_on_the_heredoc_delimiter_line() {
         // `&` belongs on the line that opens the heredoc, not after its
-        // body. Locating that heredoc means looking through the pipeline
-        // to its last command.
+        // body, and bash keeps a space after the body (`$(… )`). Locating
+        // that heredoc means looking through the pipeline to its last
+        // command.
         assert_eq!(
             reformat("a | cat <<EOF &\nbody\nEOF"),
-            "a | cat <<EOF &\nbody\nEOF\n"
+            "a | cat <<EOF &\nbody\nEOF\n "
         );
+    }
+
+    #[test]
+    fn list_operator_after_heredoc_precedes_its_body() {
+        // bash's print_deferred_heredocs: operator, bodies, then a space;
+        // `&` followed by a command gets two.
+        assert_eq!(reformat("a <<E && b\nx\nE"), "a <<E && \nx\nE\n b");
+        assert_eq!(reformat("a <<E || b\nx\nE"), "a <<E || \nx\nE\n b");
+        assert_eq!(
+            reformat("cat <<E & cat <<F &\nb\nE\nc\nF"),
+            "cat <<E &\nb\nE\n  cat <<F &\nc\nF\n "
+        );
+        // The operator goes where the bodies start, even if a body
+        // itself contains `<<`.
+        assert_eq!(reformat("cat <<E &\na <<b\nE"), "cat <<E &\na <<b\nE\n ");
     }
 
     #[test]

@@ -192,7 +192,9 @@ const fn default_fd_for_op(op: &str) -> i32 {
     }
 }
 
-/// Check if a node (or its last sub-command) has heredoc redirects.
+/// Check if a node (or its last sub-command) has heredoc redirects
+/// whose bodies are still pending: those of a simple command, or of the
+/// last command of a pipeline or of an unterminated inner list.
 pub(super) fn has_heredoc_redirect_deep(node: &Node) -> bool {
     match &node.kind {
         NodeKind::Command { redirects, .. } => redirects
@@ -201,6 +203,9 @@ pub(super) fn has_heredoc_redirect_deep(node: &Node) -> bool {
         NodeKind::Pipeline { commands, .. } => {
             commands.last().is_some_and(has_heredoc_redirect_deep)
         }
+        NodeKind::List { items } => items
+            .last()
+            .is_some_and(|i| i.operator.is_none() && has_heredoc_redirect_deep(&i.command)),
         _ => false,
     }
 }

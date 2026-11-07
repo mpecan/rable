@@ -82,6 +82,7 @@ impl Formatter {
             } = &r.kind
             {
                 if first_heredoc {
+                    self.mark_heredoc_bodies();
                     self.write_char('\n');
                     first_heredoc = false;
                 }

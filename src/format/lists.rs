@@ -1,5 +1,5 @@
 //! List-operator (`;`, `&&`, `||`, `&`) formatting for the reformatter,
-//! including the trailing-operator-before-heredoc special case.
+//! including operators that follow a command with heredoc bodies.
 
 use crate::ast::{ListItem, ListOperator};
 
@@ -8,8 +8,8 @@ use super::redirects::has_heredoc_redirect_deep;
 
 /// Returns the canonical surface syntax for a list operator, with
 /// surrounding spaces as bash's canonical form prescribes. Shared
-/// between `write_list_op` and the heredoc post-hoc insert in
-/// `insert_op_before_heredoc`.
+/// between `write_list_op` and the heredoc splice in
+/// `write_op_around_heredoc`.
 pub(super) const fn list_op_str(op: ListOperator) -> &'static str {
     match op {
         ListOperator::And => " && ",
@@ -33,6 +33,8 @@ impl Formatter {
                     let has_heredoc = has_heredoc_redirect_deep(&items[i - 1].command);
                     if op == ListOperator::Semi && has_heredoc {
                         self.write_char('\n');
+                    } else if has_heredoc {
+                        self.write_op_around_heredoc(op, true);
                     } else {
                         self.write_list_op(op);
                     }
@@ -40,6 +42,7 @@ impl Formatter {
                     self.write_str("; ");
                 }
             }
+            self.take_heredoc_bodies_at();
             self.format_node(&item.command);
         }
         // Write trailing operator on the last item (e.g., `cmd &`)
@@ -47,28 +50,38 @@ impl Formatter {
             && let Some(op) = last.operator
         {
             if has_heredoc_redirect_deep(&last.command) {
-                self.insert_op_before_heredoc(op);
+                self.write_op_around_heredoc(op, false);
             } else {
                 self.write_list_op(op);
             }
         }
     }
 
-    /// Inserts a trailing operator (like `&`) on the delimiter line
-    /// before the heredoc content, rather than after it.
-    fn insert_op_before_heredoc(&mut self, op: ListOperator) {
-        // The output currently ends with: `<<delim\ncontent\ndelim\n`
-        // Find the first `\n` after the `<<` delimiter line to insert
-        // the operator there: `<<delim &\ncontent\ndelim\n`
-        if let Some(heredoc_pos) = self.out().rfind("<<")
-            && let Some(nl_pos) = self.out()[heredoc_pos..].find('\n')
-        {
-            let insert_at = heredoc_pos + nl_pos;
-            self.insert_at(insert_at, list_op_str(op).trim_end());
+    /// Writes a list operator after a command whose heredoc bodies are
+    /// already in the output, as bash's `print_deferred_heredocs` does:
+    /// the operator goes on the delimiter line, and a space follows the
+    /// bodies — two after `&` when a command follows. So `a <<E && b`
+    /// becomes `a <<E && \nx\nE\n b`, and a trailing `cmd <<E &` ends in
+    /// `E\n ` (bash's `$(… )`). A trailing `;` prints nothing.
+    fn write_op_around_heredoc(&mut self, op: ListOperator, has_next: bool) {
+        if op == ListOperator::Semi {
             return;
         }
-        // Fallback: just append
-        self.write_list_op(op);
+        let Some(at) = self.take_heredoc_bodies_at() else {
+            self.write_list_op(op);
+            return;
+        };
+        let text = if op == ListOperator::Background {
+            " &"
+        } else {
+            list_op_str(op)
+        };
+        self.insert_at(at, text);
+        match (has_next, op) {
+            (true, ListOperator::Background) => self.write_str("  "),
+            (true, _) => self.write_char(' '),
+            (false, _) => self.write_kept_space(),
+        }
     }
 
     fn write_list_op(&mut self, op: ListOperator) {

@@ -10,6 +10,13 @@
 pub(super) struct Formatter {
     out: String,
     indent: usize,
+    /// Offset of the newline that starts the most recent command's
+    /// heredoc bodies: where a following list operator is spliced in.
+    heredoc_bodies_at: Option<usize>,
+    /// End offset of a space written after heredoc bodies. Bash keeps it
+    /// before the closing `)` (`$(cat <<E &\nx\nE\n )`), so `finish`
+    /// must not trim it.
+    kept_space_end: Option<usize>,
 }
 
 impl Formatter {
@@ -17,6 +24,8 @@ impl Formatter {
         Self {
             out: String::new(),
             indent: 0,
+            heredoc_bodies_at: None,
+            kept_space_end: None,
         }
     }
 
@@ -24,6 +33,9 @@ impl Formatter {
     /// spaces and tabs but **not** newlines — heredoc bodies end in
     /// `\n` and that terminator must survive.
     pub(super) fn finish(mut self) -> String {
+        if self.kept_space_end == Some(self.out.len()) {
+            return self.out;
+        }
         let trimmed_len = self.out.trim_end_matches([' ', '\t']).len();
         self.out.truncate(trimmed_len);
         self.out
@@ -57,17 +69,26 @@ impl Formatter {
         self.indent -= delta;
     }
 
-    /// Read-only view of the accumulated output. Required by
-    /// `insert_op_before_heredoc`, which has to `rfind` the heredoc
-    /// delimiter before deciding where to splice in a trailing
-    /// operator.
-    pub(super) fn out(&self) -> &str {
-        &self.out
+    /// Records that the current command's heredoc bodies start here
+    /// (just before the newline that ends its command line).
+    pub(super) const fn mark_heredoc_bodies(&mut self) {
+        self.heredoc_bodies_at = Some(self.out.len());
     }
 
-    /// Splice `s` into the output at byte offset `pos`. Used only by
-    /// `insert_op_before_heredoc` for the post-hoc trailing-operator
-    /// adjustment.
+    /// Takes the offset recorded by [`Self::mark_heredoc_bodies`].
+    pub(super) const fn take_heredoc_bodies_at(&mut self) -> Option<usize> {
+        self.heredoc_bodies_at.take()
+    }
+
+    /// Writes a single space that `finish` keeps even at the very end.
+    pub(super) fn write_kept_space(&mut self) {
+        self.out.push(' ');
+        self.kept_space_end = Some(self.out.len());
+    }
+
+    /// Splice `s` into the output at byte offset `pos`. Used to put a
+    /// list operator on a heredoc's delimiter line after its bodies were
+    /// written.
     pub(super) fn insert_at(&mut self, pos: usize, s: &str) {
         self.out.insert_str(pos, s);
     }
