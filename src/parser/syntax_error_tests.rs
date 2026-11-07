@@ -321,3 +321,41 @@ fn array_subscript_is_bracket_matched() {
     assert_syntax_error("arr=([a]=1;)", 10);
     assert_syntax_error("arr=(x[;])", 7);
 }
+
+// -- extended patterns ------------------------------------------------------
+
+#[test]
+fn extglob_patterns_need_extglob() {
+    assert_syntax_error("echo @(a|b)", 6);
+    assert_syntax_error("echo x+(a)", 7);
+    assert_syntax_error("case x in @(a)) :;; esac", 11);
+    assert!(crate::parse("echo @(a|b) x+(a) ?(b)", true).is_ok());
+    // `@` and `+` without a following `(` stay ordinary characters, and
+    // are valid function names once `(` no longer opens a pattern.
+    assert_words("echo foo@bar a+b", &["echo", "foo@bar", "a+b"]);
+    assert_eq!(
+        sexp("+() { :; }"),
+        "(function \"+\" (brace-group (command (word \":\"))))"
+    );
+}
+
+#[test]
+fn cond_pattern_operand_always_allows_extglob() {
+    assert_eq!(
+        sexp("[[ x == @(a|b) ]]"),
+        "(cond (cond-binary \"==\" (cond-term \"x\") (cond-term \"@(a|b)\")))"
+    );
+    assert_eq!(
+        sexp("[[ x != !(a) ]]"),
+        "(cond (cond-binary \"!=\" (cond-term \"x\") (cond-term \"!(a)\")))"
+    );
+    // Only the pattern operand: elsewhere `(` keeps its usual meaning.
+    assert_syntax_error("[[ @(a) ]]", 4);
+    assert_syntax_error("[[ -f @(a) ]]", 7);
+    // `!(` here is negation and grouping, not an extglob word.
+    assert_eq!(
+        sexp("[[ !( -f a && -f b ) ]]"),
+        "(cond (cond-expr (cond-and (cond-unary \"-f\" (cond-term \"a\")) \
+         (cond-unary \"-f\" (cond-term \"b\")))))"
+    );
+}

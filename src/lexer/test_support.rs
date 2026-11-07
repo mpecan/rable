@@ -2,10 +2,16 @@
 
 use super::{Lexer, TokenType};
 
-/// Lexes `source` to EOF, returning each token's kind and value.
-#[allow(clippy::unwrap_used)]
+/// Lexes `source` to EOF with extglob off, returning each token's kind
+/// and value.
 pub(super) fn collect_tokens(source: &str) -> Vec<(TokenType, String)> {
-    let mut lexer = Lexer::new(source, false);
+    collect_tokens_with(source, false)
+}
+
+/// Like [`collect_tokens`], with the extglob setting given explicitly.
+#[allow(clippy::unwrap_used)]
+pub(super) fn collect_tokens_with(source: &str, extglob: bool) -> Vec<(TokenType, String)> {
+    let mut lexer = Lexer::new(source, extglob);
     let mut tokens = Vec::new();
     loop {
         let tok = lexer.next_token().unwrap();
