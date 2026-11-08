@@ -325,9 +325,11 @@ impl Formatter {
         let NodeKind::Coproc { name, command } = &node.kind else {
             return;
         };
+        // bash names every coproc whose body is not a simple command,
+        // `COPROC` by default: `coproc ( cat )` → `coproc COPROC ( cat )`.
         self.write_str("coproc ");
-        if let Some(n) = name.as_deref() {
-            self.write_str(n);
+        if !matches!(command.kind, NodeKind::Command { .. }) {
+            self.write_str(name.as_deref().unwrap_or("COPROC"));
             self.write_char(' ');
         }
         self.format_node(command);

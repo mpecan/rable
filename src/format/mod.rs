@@ -142,12 +142,6 @@ mod tests {
     }
 
     #[test]
-    fn formats_coproc_with_and_without_a_name() {
-        assert_eq!(reformat("coproc { ls; }"), "coproc { ls; }");
-        assert_eq!(reformat("coproc NAME { ls; }"), "coproc NAME { ls; }");
-    }
-
-    #[test]
     fn omits_the_file_descriptor_when_it_is_the_operator_default() {
         // Input redirections default to fd 0, output redirections to fd 1.
         assert_eq!(reformat("cat 0< f; echo hi"), "cat < f; echo hi");
@@ -165,6 +159,14 @@ mod tests {
         assert_eq!(reformat("(cmd) |& cat"), "( cmd ) 2>&1 | cat");
         assert_eq!(reformat("{ a; } |& b"), "{ a; } 2>&1 | b");
         assert_eq!(reformat("((x++)) |& c"), "((x++)) 2>&1 | c");
+    }
+
+    #[test]
+    fn coproc_with_a_compound_body_is_named() {
+        assert_eq!(reformat("coproc { ls; }"), "coproc COPROC { ls; }");
+        assert_eq!(reformat("coproc NAME { ls; }"), "coproc NAME { ls; }");
+        assert_eq!(reformat("coproc (cat)"), "coproc COPROC ( cat )");
+        assert_eq!(reformat("coproc cat <f"), "coproc cat < f");
     }
 
     #[test]
