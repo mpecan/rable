@@ -54,26 +54,34 @@ pub struct Parser {
 /// substitution — their bodies are structurally identical (a command list
 /// terminated by `)`), and `LexerMode::Cmdsub` already provides the
 /// `DELIM)`-rewind heredoc behavior both need.
-pub fn parse_paren_body(outer: &Lexer, outer_depth: usize) -> Result<(usize, usize)> {
+pub fn parse_paren_body(outer: &Lexer, outer_depth: usize) -> Result<ForkedBody> {
     let mut parser = Parser::forked(outer, LexerMode::Cmdsub, outer_depth);
-    parser.parse_paren_body_inner()?;
-    Ok((parser.lexer.pos(), parser.lexer.line()))
+    parser.skip_newlines()?;
+    let body = parser.parse_body_until(TokenType::RightParen)?;
+    parser.expect(TokenType::RightParen)?;
+    Ok(parser.finish_fork(body))
 }
 
 /// Runs the real command-list grammar on a fork of `outer` positioned
 /// after `${ ` or `${|`, up to and including the `}` reserved word that
 /// closes the command substitution. Returns the inner lexer's final
 /// `(pos, line)`; the parsed AST is discarded, as for `$(…)`.
-pub fn parse_funsub_body(outer: &Lexer, outer_depth: usize) -> Result<(usize, usize)> {
+pub fn parse_funsub_body(outer: &Lexer, outer_depth: usize) -> Result<ForkedBody> {
     let mut parser = Parser::forked(outer, LexerMode::Cmdsub, outer_depth);
     parser.lexer.enter_funsub();
     parser.lexer.set_command_start();
     parser.skip_newlines()?;
-    if !parser.peek_is(TokenType::RightBrace)? {
-        let _ = parser.parse_list()?;
-    }
+    let body = parser.parse_body_until(TokenType::RightBrace)?;
     parser.expect_closing(TokenType::RightBrace, "}")?;
-    Ok((parser.lexer.pos(), parser.lexer.line()))
+    Ok(parser.finish_fork(body))
+}
+
+/// Where a forked body parse stopped (`pos`, `line`, just past its closing
+/// delimiter) and the command list it parsed.
+pub struct ForkedBody {
+    pub pos: usize,
+    pub line: usize,
+    pub body: Node,
 }
 
 /// Runs the real command-list grammar on a backtick fork of `outer`
@@ -100,13 +108,23 @@ impl Parser {
         Self { lexer, depth: 0 }
     }
 
-    fn parse_paren_body_inner(&mut self) -> Result<()> {
-        self.skip_newlines()?;
-        if !self.peek_is(TokenType::RightParen)? {
-            let _ = self.parse_list()?;
+    /// Parses a substitution body up to (not including) `close`: a command
+    /// list with its heredoc contents filled in, or `Empty` (`$( )`).
+    fn parse_body_until(&mut self, close: TokenType) -> Result<Node> {
+        if self.peek_is(close)? {
+            return Ok(Node::empty(NodeKind::Empty));
         }
-        self.expect(TokenType::RightParen)?;
-        Ok(())
+        let mut body = self.parse_list()?;
+        fill_heredoc_contents(&mut body, &mut self.lexer);
+        Ok(body)
+    }
+
+    const fn finish_fork(&self, body: Node) -> ForkedBody {
+        ForkedBody {
+            pos: self.lexer.pos(),
+            line: self.lexer.line(),
+            body,
+        }
     }
 
     fn parse_backtick_body_inner(&mut self) -> Result<()> {

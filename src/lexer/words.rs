@@ -349,8 +349,8 @@ impl Lexer {
         wb.push(dir);
         self.advance_char(); // (
         wb.push('(');
-        self.read_paren_body_forked(wb)?;
-        wb.record(start, WordSpanKind::ProcessSub(dir));
+        let body = self.read_paren_body_forked(wb)?;
+        wb.record_body(start, WordSpanKind::ProcessSub(dir), body);
         Ok(())
     }
 
@@ -366,8 +366,8 @@ impl Lexer {
         self.advance_char();
         wb.push('(');
         // Read until matching ) via fork-and-merge
-        self.read_paren_body_forked(&mut wb)?;
-        wb.record(span_start, WordSpanKind::ProcessSub(dir));
+        let body = self.read_paren_body_forked(&mut wb)?;
+        wb.record_body(span_start, WordSpanKind::ProcessSub(dir), body);
         // Continue reading word chars after the process substitution
         self.continue_word(&mut wb)?;
         self.advance_word_context(TokenType::Word, &wb.value, false);

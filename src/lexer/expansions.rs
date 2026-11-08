@@ -1,3 +1,4 @@
+use crate::ast::Node;
 use crate::error::{RableError, Result};
 
 use super::Lexer;
@@ -5,8 +6,8 @@ use super::word_builder::{QuotingContext, WordBuilder, WordSpanKind};
 
 /// A parser entry (`parse_paren_body`, `parse_funsub_body`) that runs the
 /// grammar on a fork of the lexer at a given depth and returns where the
-/// fork stopped, as `(pos, line)`.
-type ForkedBodyParser = fn(&Lexer, usize) -> Result<(usize, usize)>;
+/// fork stopped and what it parsed.
+type ForkedBodyParser = fn(&Lexer, usize) -> Result<crate::parser::ForkedBody>;
 
 impl Lexer {
     /// Reads a dollar expansion into the value string.
@@ -25,8 +26,8 @@ impl Lexer {
                     self.read_matched_parens(wb, true)?;
                     wb.record(span_start, WordSpanKind::ArithmeticSub);
                 } else {
-                    self.read_command_sub(wb)?;
-                    wb.record(span_start, WordSpanKind::CommandSub);
+                    let body = self.read_command_sub(wb)?;
+                    wb.record_body(span_start, WordSpanKind::CommandSub, body);
                 }
             }
             Some('{') => {
@@ -38,8 +39,8 @@ impl Lexer {
                         self.advance_char();
                         wb.push('|');
                     }
-                    self.read_funsub_body(wb)?;
-                    wb.record(span_start, WordSpanKind::FunSub(marker == '|'));
+                    let body = self.read_funsub_body(wb)?;
+                    wb.record_body(span_start, WordSpanKind::FunSub(marker == '|'), body);
                 } else {
                     self.read_param_expansion_braces(wb)?;
                     wb.record(span_start, WordSpanKind::ParamExpansion);
@@ -76,7 +77,7 @@ impl Lexer {
     /// buffer. The fork consumes up to and including the matching `)`;
     /// the consumed range is then copied into `wb.value`. Precondition:
     /// `read_dollar` has already pushed `$(`.
-    fn read_command_sub(&mut self, wb: &mut WordBuilder) -> Result<()> {
+    fn read_command_sub(&mut self, wb: &mut WordBuilder) -> Result<Node> {
         self.read_paren_body_forked(wb)
     }
 
@@ -85,7 +86,7 @@ impl Lexer {
     /// including the closing `)`. Used by both `$(...)` (command
     /// substitution) and `<(...)`/`>(...)` (process substitution).
     /// Precondition: the opening `(` has just been consumed.
-    pub(super) fn read_paren_body_forked(&mut self, wb: &mut WordBuilder) -> Result<()> {
+    pub(super) fn read_paren_body_forked(&mut self, wb: &mut WordBuilder) -> Result<Node> {
         self.read_body_forked(wb, crate::parser::parse_paren_body)
     }
 
@@ -96,19 +97,19 @@ impl Lexer {
         &mut self,
         wb: &mut WordBuilder,
         parse_body: ForkedBodyParser,
-    ) -> Result<()> {
+    ) -> Result<Node> {
         let body_start = self.pos;
-        let (end_pos, end_line) = parse_body(self, self.parser_depth())?;
+        let forked = parse_body(self, self.parser_depth())?;
         wb.value
-            .extend(self.input[body_start..end_pos].iter().copied());
-        self.pos = end_pos;
-        self.line = end_line;
-        Ok(())
+            .extend(self.input[body_start..forked.pos].iter().copied());
+        self.pos = forked.pos;
+        self.line = forked.line;
+        Ok(forked.body)
     }
 
     /// Reads the body of `${ …; }` / `${| …; }` by forking the real
     /// grammar, like `$(…)`, up to and including its closing `}`.
-    fn read_funsub_body(&mut self, wb: &mut WordBuilder) -> Result<()> {
+    fn read_funsub_body(&mut self, wb: &mut WordBuilder) -> Result<Node> {
         self.read_body_forked(wb, crate::parser::parse_funsub_body)
     }
 

@@ -9,8 +9,6 @@ use crate::lexer::word_builder::WordSpan;
 use crate::sexp::process_ansi_c_content;
 use crate::sexp::word::{WordSegment, segments_from_spans};
 
-use super::reformat_or_normalize;
-
 /// Process a word value for canonical bash output using span-based
 /// segment extraction. Returns a fresh `String` rather than writing to
 /// a `Formatter` because callers embed the result into larger strings
@@ -34,18 +32,18 @@ pub(super) fn process_word_value(value: &str, spans: &[WordSpan]) -> String {
                 // $"..." → "..." (content includes the "..." delimiters)
                 result.push_str(content);
             }
-            WordSegment::CommandSubstitution(content) => {
+            WordSegment::CommandSubstitution(sub) => {
                 result.push_str("$(");
-                result.push_str(&reformat_or_normalize(content));
+                result.push_str(&sub.text());
                 result.push(')');
             }
-            WordSegment::FunSub { pipe, content } => {
-                result.push_str(&super::funsub_text(*pipe, content));
+            WordSegment::FunSub { pipe, sub } => {
+                result.push_str(&super::funsub_text(*pipe, sub));
             }
-            WordSegment::ProcessSubstitution(direction, content) => {
+            WordSegment::ProcessSubstitution(direction, sub) => {
                 result.push(*direction);
                 result.push('(');
-                result.push_str(&reformat_or_normalize(content));
+                result.push_str(&sub.procsub_text());
                 result.push(')');
             }
             WordSegment::ParamExpansion(text)

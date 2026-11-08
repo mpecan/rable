@@ -87,10 +87,10 @@ fn segment_to_node(seg: WordSegment) -> Node {
             Node::empty(NodeKind::LocaleString { content, inner })
         }
         WordSegment::ArithmeticSub(inner) => substitution::arithmetic_sub_to_node(&inner),
-        WordSegment::CommandSubstitution(content) => substitution::cmdsub_to_node(&content),
-        WordSegment::FunSub { pipe, content } => substitution::funsub_to_node(pipe, &content),
-        WordSegment::ProcessSubstitution(direction, content) => {
-            substitution::procsub_to_node(direction, &content)
+        WordSegment::CommandSubstitution(sub) => substitution::cmdsub_to_node(&sub),
+        WordSegment::FunSub { pipe, sub } => substitution::funsub_to_node(pipe, &sub),
+        WordSegment::ProcessSubstitution(direction, sub) => {
+            substitution::procsub_to_node(direction, &sub)
         }
         WordSegment::SimpleVar(text) => param_expansion::parse_simple_var(&text),
         WordSegment::ParamExpansion(text) => param_expansion::parse_braced_param(&text),

@@ -24,6 +24,7 @@ mod words;
 
 use std::cell::Cell;
 
+use crate::ast::Node;
 use formatter::Formatter;
 
 thread_local! {
@@ -53,6 +54,21 @@ impl Drop for DepthGuard {
     }
 }
 
+/// The canonical text of a substitution body: printed from the command
+/// list the lexer parsed for it, as bash prints a command substitution
+/// from its parse tree, or (for backticks, which have no tree) reformatted
+/// from its text.
+pub fn substitution_text(body: Option<&Node>, content: &str) -> String {
+    body.map_or_else(
+        || reformat_or_normalize(content),
+        |node| {
+            let mut f = Formatter::new();
+            f.format_node(node);
+            f.finish()
+        },
+    )
+}
+
 /// The canonical text of a command substitution body: reformatted when
 /// it parses, otherwise trimmed (see [`crate::sexp::normalize_cmdsub_content`]).
 pub fn reformat_or_normalize(content: &str) -> String {
@@ -63,9 +79,10 @@ pub fn reformat_or_normalize(content: &str) -> String {
 /// `${` / `${|`, before `}`): the reformatted body, a `;` unless the body
 /// ends a line or with ` &` (bash's `semicolon()`), then ` }`. So
 /// `${ echo hi;}` → `${ echo hi; }` and `${| echo hi; }` → `${|echo hi; }`.
-pub fn funsub_text(pipe: bool, content: &str) -> String {
+pub fn funsub_text(pipe: bool, sub: &crate::sexp::word::Substitution) -> String {
+    let content = sub.content.as_str();
     let open = if pipe { "${|" } else { "${ " };
-    let mut body = reformat_or_normalize(content);
+    let mut body = sub.text();
     if body.is_empty() {
         // bash prints an empty body as `${ }`, with or without the `|`.
         return "${ }".to_string();
@@ -85,10 +102,12 @@ pub fn funsub_text(pipe: bool, content: &str) -> String {
 /// Attempts to reformat bash source into canonical form.
 /// Returns `None` if parsing fails (in which case raw text is used).
 ///
-/// The re-parse runs in `LexerMode::Cmdsub` because `reformat_bash` is
-/// only ever called on content extracted from a `$(…)` / `<(…)` / `>(…)`
-/// span, and that mode enables the same sloppy heredoc-terminator
-/// recognition the original fork used (see #39 and
+/// `$(…)`, `<(…)`/`>(…)` and `${ …; }` bodies are printed from the tree
+/// the lexer already parsed (see [`substitution_text`]); this re-parse is
+/// only the fallback for backtick bodies, which have no tree, and is
+/// bounded by a size cap and a nesting depth guard. It runs in
+/// `LexerMode::Cmdsub` for the same sloppy heredoc-terminator recognition
+/// a substitution's fork uses (see #39 and
 /// `Lexer::try_match_sloppy_delimiter`).
 pub fn reformat_bash(source: &str) -> Option<String> {
     if source.is_empty() || source.len() > 1000 {
@@ -299,10 +318,23 @@ mod tests {
     }
 
     #[test]
-    fn nested_substitutions_stop_reformatting_at_the_depth_limit() {
-        // One level in, `c;d` is normalized to `c; d`. Two levels in the
-        // budget is spent and the text is left exactly as written.
+    fn long_substitution_bodies_are_reformatted_too() {
+        // Bodies print from the lexer's tree, so the re-parse size cap no
+        // longer applies: bash reformats `$(a;b …)` whatever its length.
+        let source = format!("echo $({})", "a;b ".repeat(300));
+        let Ok(nodes) = crate::parse(&source, false) else {
+            unreachable!("{source:?} should parse");
+        };
+        let sexp = nodes[0].to_string();
+        assert!(sexp.contains("$(a; b a; b"), "{sexp:.80}");
+    }
+
+    #[test]
+    fn nested_substitutions_are_reformatted_at_every_level() {
+        // Each body is printed from the tree the lexer parsed for it, so
+        // nesting depth makes no difference, as in bash.
         assert_eq!(reformat("a $(b;c)"), "a $(b; c)");
-        assert_eq!(reformat("a $(b $(c;d))"), "a $(b $(c;d))");
+        assert_eq!(reformat("a $(b $(c;d))"), "a $(b $(c; d))");
+        assert_eq!(reformat("a $(b $(c $(d;e)))"), "a $(b $(c $(d; e)))");
     }
 }

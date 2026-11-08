@@ -73,18 +73,12 @@ pub(super) fn write_redirect_segments(
                 // $"..." → "..." (content already includes "...")
                 write!(f, "{content}")?;
             }
-            WordSegment::CommandSubstitution(content) => {
-                write!(f, "$(")?;
-                write!(f, "{}", crate::format::reformat_or_normalize(content))?;
-                write!(f, ")")?;
+            WordSegment::CommandSubstitution(sub) => write!(f, "$({})", sub.text())?,
+            WordSegment::FunSub { pipe, sub } => {
+                write!(f, "{}", crate::format::funsub_text(*pipe, sub))?;
             }
-            WordSegment::FunSub { pipe, content } => {
-                write!(f, "{}", crate::format::funsub_text(*pipe, content))?;
-            }
-            WordSegment::ProcessSubstitution(dir, content) => {
-                write!(f, "{dir}(")?;
-                write!(f, "{}", crate::format::reformat_or_normalize(content))?;
-                write!(f, ")")?;
+            WordSegment::ProcessSubstitution(dir, sub) => {
+                write!(f, "{dir}({})", sub.procsub_text())?;
             }
             WordSegment::ParamExpansion(text)
             | WordSegment::SimpleVar(text)

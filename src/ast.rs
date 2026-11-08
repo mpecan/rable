@@ -17,12 +17,16 @@ pub struct Span {
 /// Records where each expansion starts/ends in the raw token text.
 /// External consumers see this type through the variant field but cannot
 /// read or construct it — the fields are crate-private.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WordSpan {
     pub(crate) start: usize,
     pub(crate) end: usize,
     pub(crate) kind: WordSpanKind,
     pub(crate) context: QuotingContext,
+    /// The command list a `$(…)`, `<(…)`/`>(…)` or `${ …; }` holds, as the
+    /// lexer's forked parse produced it, so printers and word parts never
+    /// re-parse the text. `None` for other spans and for backticks.
+    pub(crate) body: Option<std::sync::Arc<Node>>,
 }
 
 impl Span {

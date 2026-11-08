@@ -6,14 +6,41 @@
 
 use std::fmt;
 
-use crate::ast::NodeKind;
+use crate::ast::{Node, NodeKind};
 use crate::format;
 use crate::lexer::word_builder::WordSpan;
 
 use super::{ansi_c::process_ansi_c_content, write_escaped_char, write_escaped_word};
 
+/// The body of a command or process substitution: its source text and
+/// the command list the lexer parsed for it (`None` for backticks, whose
+/// body is escaped text).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Substitution {
+    pub content: String,
+    pub body: Option<std::sync::Arc<Node>>,
+}
+
+impl Substitution {
+    /// The body as bash prints it: from its AST, else reformatted text.
+    pub fn text(&self) -> String {
+        format::substitution_text(self.body.as_deref(), &self.content)
+    }
+
+    /// The body of a process substitution: like [`Self::text`], except
+    /// that a body starting with `(` is kept as written (trimmed).
+    pub fn procsub_text(&self) -> String {
+        let trimmed = self.content.trim();
+        if trimmed.starts_with('(') {
+            trimmed.to_string()
+        } else {
+            self.text()
+        }
+    }
+}
+
 /// A typed segment within a word token's raw value.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum WordSegment {
     /// Regular text — escaped when formatted.
     Literal(String),
@@ -26,13 +53,14 @@ pub enum WordSegment {
     /// [`segments_with_params`] (the `Word.parts` path); the sexp path
     /// leaves `$((...))` as literal text for backwards compatibility.
     ArithmeticSub(String),
-    /// Command substitution `$(...)` — content is between the parens.
-    CommandSubstitution(String),
-    /// Process substitution `>(...)` or `<(...)` — direction + content.
-    ProcessSubstitution(char, String),
-    /// Command substitution `${ …; }`, or `${| …; }` when `pipe` — content
+    /// Command substitution `$(...)` or `` `...` `` — the body between
+    /// the delimiters.
+    CommandSubstitution(Substitution),
+    /// Process substitution `>(...)` or `<(...)` — direction + body.
+    ProcessSubstitution(char, Substitution),
+    /// Command substitution `${ …; }`, or `${| …; }` when `pipe` — the body
     /// is the text between [`funsub_opener`] and the closing `}`.
-    FunSub { pipe: bool, content: String },
+    FunSub { pipe: bool, sub: Substitution },
     /// Parameter expansion `${...}` — raw text includes `${` and `}`.
     ParamExpansion(String),
     /// Simple variable `$var` — raw text includes `$` prefix.
@@ -85,19 +113,19 @@ fn write_one_segment(f: &mut fmt::Formatter<'_>, seg: &WordSegment) -> fmt::Resu
             }
             write!(f, "))")
         }
-        WordSegment::CommandSubstitution(content) => write_cmdsub_segment(f, content),
-        WordSegment::FunSub { pipe, content } => {
-            write_escaped_word(f, &format::funsub_text(*pipe, content))
+        WordSegment::CommandSubstitution(sub) => write_cmdsub_segment(f, sub),
+        WordSegment::FunSub { pipe, sub } => {
+            write_escaped_word(f, &format::funsub_text(*pipe, sub))
         }
-        WordSegment::ProcessSubstitution(direction, content) => {
-            write_procsub_segment(f, *direction, content)
+        WordSegment::ProcessSubstitution(direction, sub) => {
+            write_procsub_segment(f, *direction, sub)
         }
     }
 }
 
-fn write_cmdsub_segment(f: &mut fmt::Formatter<'_>, content: &str) -> fmt::Result {
+fn write_cmdsub_segment(f: &mut fmt::Formatter<'_>, sub: &Substitution) -> fmt::Result {
     write!(f, "$(")?;
-    let body = format::reformat_or_normalize(content);
+    let body = sub.text();
     // Add space if content starts with ( to avoid $((
     if body.starts_with('(') {
         write!(f, " ")?;
@@ -109,16 +137,10 @@ fn write_cmdsub_segment(f: &mut fmt::Formatter<'_>, content: &str) -> fmt::Resul
 fn write_procsub_segment(
     f: &mut fmt::Formatter<'_>,
     direction: char,
-    content: &str,
+    sub: &Substitution,
 ) -> fmt::Result {
     write!(f, "{direction}(")?;
-    let trimmed = content.trim();
-    // Don't reformat content that starts with ( (subshell inside procsub)
-    if trimmed.starts_with('(') {
-        write_escaped_word(f, trimmed)?;
-    } else {
-        write_escaped_word(f, &format::reformat_or_normalize(content))?;
-    }
+    write_escaped_word(f, &sub.procsub_text())?;
     write!(f, ")")
 }
 
@@ -179,13 +201,16 @@ fn span_to_segment(
     match &span.kind {
         WordSpanKind::CommandSub => {
             if let Some(c) = value.get(span.start + 2..span.end - 1) {
-                segments.push(WordSegment::CommandSubstitution(c.to_string()));
+                segments.push(WordSegment::CommandSubstitution(substitution(c, span)));
             }
         }
         WordSpanKind::FunSub(pipe) => push_funsub_span(segments, value, span, *pipe),
         WordSpanKind::ProcessSub(dir) => {
             if let Some(c) = value.get(span.start + 2..span.end - 1) {
-                segments.push(WordSegment::ProcessSubstitution(*dir, c.to_string()));
+                segments.push(WordSegment::ProcessSubstitution(
+                    *dir,
+                    substitution(c, span),
+                ));
             }
         }
         WordSpanKind::AnsiCQuote => {
@@ -230,10 +255,18 @@ fn span_to_segment(
             if span.end > span.start + 1
                 && let Some(c) = value.get(span.start + 1..span.end - 1)
             {
-                segments.push(WordSegment::CommandSubstitution(c.to_string()));
+                segments.push(WordSegment::CommandSubstitution(substitution(c, span)));
             }
         }
         _ => {} // filtered out by span filter
+    }
+}
+
+/// A substitution body `content` with the AST its span carries.
+fn substitution(content: &str, span: &crate::lexer::word_builder::WordSpan) -> Substitution {
+    Substitution {
+        content: content.to_string(),
+        body: span.body.clone(),
     }
 }
 
@@ -255,7 +288,7 @@ fn push_funsub_span(
     if let Some(content) = value.get(span.start + open..span.end - 1) {
         segments.push(WordSegment::FunSub {
             pipe,
-            content: content.to_string(),
+            sub: substitution(content, span),
         });
     }
 }
