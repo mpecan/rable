@@ -96,7 +96,7 @@ impl Lexer {
         } else if self.config.extglob && wb.value.ends_with(['@', '?', '+', '!', '*']) {
             self.advance_char();
             wb.push('(');
-            self.read_matched_parens(wb, 1)?;
+            self.read_matched_parens(wb, 1, false)?;
             Ok(ControlFlow::Continue(()))
         } else {
             Ok(ControlFlow::Break(()))
@@ -264,7 +264,7 @@ impl Lexer {
         wb.push(prefix);
         self.advance_char();
         wb.push('(');
-        self.read_matched_parens(wb, 1)?;
+        self.read_matched_parens(wb, 1, false)?;
         wb.record(start, WordSpanKind::Extglob(prefix));
         Ok(())
     }

@@ -70,7 +70,6 @@ pub mod token;
 pub mod sexp;
 
 // Implementation details — not part of the stable API
-pub(crate) mod context;
 pub(crate) mod format;
 pub(crate) mod lexer;
 pub(crate) mod parser;

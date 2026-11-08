@@ -24,7 +24,6 @@
 | `src/ast.rs` | `Node` struct, `NodeKind` enum with 50+ variants, `Span` |
 | `src/token.rs` | `TokenType` enum (62 variants), `Token` struct |
 | `src/error.rs` | `RableError` (Parse / MatchedPair) via thiserror |
-| `src/context.rs` | Parsing context and state management |
 | `src/lexer/` | Hand-written context-sensitive tokenizer |
 | `src/lexer/quotes.rs` | Quote and escape handling |
 | `src/lexer/heredoc.rs` | Here-document processing |

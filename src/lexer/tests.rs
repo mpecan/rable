@@ -283,27 +283,21 @@ fn trailing_backslash_in_arith_is_graceful_error() {
 }
 
 #[test]
-fn paren_content_comment_stops_at_newline() {
-    // A `#` preceded by whitespace inside `$((…))` starts a
-    // comment that runs to the next newline; the closing `))`
-    // after the newline must still be recognized. Exercises
-    // the comment-gating arm of `read_matched_parens_inner`.
-    // Regression guard for issue #53.
-    let tokens = collect_tokens("$(( # comment\n 1+2 ))");
-    assert_eq!(tokens.len(), 1, "tokens = {tokens:?}");
-    assert_eq!(tokens[0].0, TokenType::Word);
-    // The comment text is skipped from wb.value; the word value
-    // preserves everything else including the newline.
-    assert!(
-        tokens[0].1.starts_with("$((") && tokens[0].1.ends_with("))"),
-        "unexpected word value: {:?}",
-        tokens[0].1
-    );
-    assert!(
-        !tokens[0].1.contains("comment"),
-        "comment text must be skipped: {:?}",
-        tokens[0].1
-    );
+fn arith_expansion_scans_like_bash_p_arith() {
+    // bash's `$((…))` scan counts only parentheses: `#` is not a
+    // comment, a plain `${` is ordinary text, and `case`-like words do
+    // not change how `)` is counted. Each is one word, kept verbatim.
+    for src in [
+        "$(( # comment\n 1+2 ))",
+        "$((16 #>> 2))",
+        "$((${x))",
+        "$((${x)})",
+        "$((2 case ;&** 8))",
+        "$(( ${ echo 1; } + 1 ))",
+    ] {
+        let tokens = collect_tokens(src);
+        assert_eq!(tokens, vec![(TokenType::Word, src.to_string())], "`{src}`");
+    }
 }
 
 #[test]
