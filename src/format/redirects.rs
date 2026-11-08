@@ -137,6 +137,13 @@ impl Formatter {
 
     pub(super) fn format_pipeline(&mut self, commands: &[Node]) {
         for (i, cmd) in commands.iter().enumerate() {
+            // `|&` after a compound command is a bare `2>&1` stage, as in
+            // bash's own dump; bash prints it on the command: `( a ) 2>&1 | b`.
+            if matches!(cmd.kind, NodeKind::Redirect { .. }) {
+                self.write_char(' ');
+                self.format_redirect(cmd);
+                continue;
+            }
             if i > 0 {
                 // ` |`, then the previous stage's heredoc bodies and their
                 // space, then one more: `a <<E |\nx\nE\n  b`, or `a | b`.

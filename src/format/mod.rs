@@ -156,6 +156,18 @@ mod tests {
     }
 
     #[test]
+    fn arithmetic_commands_and_pipe_both_after_compounds() {
+        // These used to leak S-expression text into the word.
+        assert_eq!(reformat("((x  =5)) >f"), "((x  =5)) > f");
+        assert_eq!(reformat("((x)) && y"), "((x)) && y");
+        // `|&` after a compound is a bare `2>&1` stage; bash prints it on
+        // the command.
+        assert_eq!(reformat("(cmd) |& cat"), "( cmd ) 2>&1 | cat");
+        assert_eq!(reformat("{ a; } |& b"), "{ a; } 2>&1 | b");
+        assert_eq!(reformat("((x++)) |& c"), "((x++)) 2>&1 | c");
+    }
+
+    #[test]
     fn dup_move_and_close_follow_bash_print_redirection() {
         // A numeric dup or a move always prints its fd; a close is always
         // `N>&-`; a dup to a word omits the default fd.

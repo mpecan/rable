@@ -47,6 +47,7 @@ impl Formatter {
             NodeKind::Time { .. } => self.format_time(node),
             NodeKind::Coproc { .. } => self.format_coproc(node),
             NodeKind::ConditionalExpr { .. } => self.format_conditional_expr(node),
+            NodeKind::ArithmeticCommand { .. } => self.format_arith_command(node),
             _ => self.write_str(&node.to_string()),
         }
     }

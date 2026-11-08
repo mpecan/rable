@@ -272,6 +272,22 @@ impl Formatter {
 
     /// Bash prints `time` before `!` whichever order they were written
     /// in: `! time a` and `time ! a` both become `time ! a`.
+    /// `(( expr ))`: bash prints the expression text as written.
+    pub(super) fn format_arith_command(&mut self, node: &Node) {
+        let NodeKind::ArithmeticCommand {
+            raw_content,
+            redirects,
+            ..
+        } = &node.kind
+        else {
+            return;
+        };
+        self.write_str("((");
+        self.write_str(raw_content);
+        self.write_str("))");
+        self.write_trailing_redirects(redirects);
+    }
+
     pub(super) fn format_negation(&mut self, node: &Node) {
         let NodeKind::Negation { pipeline } = &node.kind else {
             return;
