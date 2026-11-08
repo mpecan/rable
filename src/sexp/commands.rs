@@ -111,7 +111,7 @@ const fn list_op_name(op: ListOperator) -> &'static str {
     match op {
         ListOperator::And => "and",
         ListOperator::Or => "or",
-        ListOperator::Semi => "semi",
+        ListOperator::Semi | ListOperator::Newline => "semi",
         ListOperator::Background => "background",
     }
 }

@@ -390,8 +390,12 @@ pub enum ListOperator {
     And,
     /// `||`
     Or,
-    /// `;` or `\n`
+    /// `;`
     Semi,
+    /// A newline separating two commands. Dumped like `;` (`(semi …)`),
+    /// but bash keeps it as a newline when reprinting command
+    /// substitutions: `$({ a\nb; })`.
+    Newline,
     /// `&`
     Background,
 }

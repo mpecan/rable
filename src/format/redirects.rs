@@ -160,6 +160,9 @@ impl Formatter {
     /// compound-construct formatters that need to appendix a redirect
     /// list to their terminator keyword.
     pub(super) fn write_trailing_redirects(&mut self, redirects: &[Node]) {
+        if !redirects.is_empty() {
+            self.take_was_heredoc();
+        }
         for r in redirects {
             self.write_char(' ');
             self.format_redirect(r);

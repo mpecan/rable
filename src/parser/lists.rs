@@ -95,17 +95,18 @@ impl Parser {
                 break;
             }
             let prev_pos = self.lexer.pos();
-            let kind = self.lexer.peek_token()?.kind;
-            if !matches!(kind, TokenType::Semi | TokenType::Newline) {
-                break;
-            }
+            let op = match self.lexer.peek_token()?.kind {
+                TokenType::Semi => ListOperator::Semi,
+                TokenType::Newline => ListOperator::Newline,
+                _ => break,
+            };
             self.lexer.next_token()?;
             self.skip_newlines()?;
             if self.at_end()? || self.is_list_terminator()? {
                 break;
             }
             let right = self.parse_background()?;
-            left = make_list(left, ListOperator::Semi, right);
+            left = make_list(left, op, right);
             if self.lexer.pos() == prev_pos {
                 break;
             }

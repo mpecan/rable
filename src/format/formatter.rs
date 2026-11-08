@@ -19,6 +19,11 @@ pub(super) struct Formatter {
     /// heredoc bodies (`$(cat <<E &\nx\nE\n )`) or a bare `!` (`$(! )`),
     /// so `finish` must not trim it.
     kept_space_end: Option<usize>,
+    /// bash's `was_heredoc`: heredoc bodies were the last thing printed,
+    /// so the next `;` connector is not printed (`a <<E && b; c` →
+    /// `a <<E && \nx\nE\n b c`). Reset by a command's redirects and by
+    /// the end of a subshell or group, as in `print_cmd.c`.
+    was_heredoc: bool,
 }
 
 impl Formatter {
@@ -28,6 +33,7 @@ impl Formatter {
             indent: 0,
             pending_heredocs: Vec::new(),
             kept_space_end: None,
+            was_heredoc: false,
         }
     }
 
@@ -104,7 +110,7 @@ impl Formatter {
 
     /// Writes the pending heredoc bodies: one `\n` ends the command line,
     /// then each body in source order. Returns whether there were any.
-    fn flush_heredocs(&mut self) -> bool {
+    pub(super) fn flush_heredocs(&mut self) -> bool {
         if self.pending_heredocs.is_empty() {
             return false;
         }
@@ -112,7 +118,24 @@ impl Formatter {
         for body in self.pending_heredocs.drain(..) {
             self.out.push_str(&body);
         }
+        self.was_heredoc = true;
         true
+    }
+
+    /// bash's `semicolon()`: writes `;` unless the output already ends a
+    /// line (heredoc bodies) or a background command (` &`).
+    pub(super) fn semicolon(&mut self) {
+        self.flush_heredocs();
+        if !(self.out.ends_with('\n') || self.out.ends_with(" &")) {
+            self.out.push(';');
+        }
+    }
+
+    /// Takes bash's `was_heredoc` flag (see the field).
+    pub(super) const fn take_was_heredoc(&mut self) -> bool {
+        let was = self.was_heredoc;
+        self.was_heredoc = false;
+        was
     }
 
     /// Writes a single space that `finish` keeps even at the very end.

@@ -162,6 +162,34 @@ mod tests {
     }
 
     #[test]
+    fn separators_after_heredocs_follow_bash_print_cmd() {
+        // Bodies take a `;`'s place, and bash then drops the next `;`.
+        assert_eq!(reformat("a <<E; b\nx\nE"), "a <<E\nx\nE\n b");
+        assert_eq!(reformat("a <<E && b; c\nx\nE"), "a <<E && \nx\nE\n b c");
+        assert_eq!(
+            reformat("a <<E && b; c; d\nx\nE"),
+            "a <<E && \nx\nE\n b c; d"
+        );
+        // `semicolon()`: no `;` right after the bodies.
+        assert_eq!(reformat("{ a <<E; } && b\nx\nE"), "{ a <<E\nx\nE\n } && b");
+        // A newline separator stays a newline.
+        assert_eq!(reformat("{ a\nb; }"), "{ a\nb; }");
+        assert_eq!(
+            reformat("{ cat <<E\nx\nE\n  b; }"),
+            "{ cat <<E\nx\nE\n\nb; }"
+        );
+    }
+
+    #[test]
+    fn function_bodies_break_lines_like_bash() {
+        let body = |source: &str| reformat(source).replace("function f () \n{ \n", "");
+        assert_eq!(body("f() { a; b; c; }"), "    a;\n    b;\n    c\n}");
+        assert_eq!(body("f() { a & b; }"), "    a & b\n}");
+        assert_eq!(body("f() { a & }"), "    a &\n}");
+        assert_eq!(body("f() { a\nb; }"), "    a\n\n    b\n}");
+    }
+
+    #[test]
     fn coproc_with_a_compound_body_is_named() {
         assert_eq!(reformat("coproc { ls; }"), "coproc COPROC { ls; }");
         assert_eq!(reformat("coproc NAME { ls; }"), "coproc NAME { ls; }");

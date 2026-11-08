@@ -30,11 +30,18 @@ impl Formatter {
         };
         self.write_str("if ");
         self.format_node(condition);
-        self.write_str("; then\n");
+        self.semicolon();
+        // After heredoc bodies bash starts `then` on its own indented line.
+        if self.take_was_heredoc() {
+            self.write_indent(4);
+            self.write_str("then\n");
+        } else {
+            self.write_str(" then\n");
+        }
         self.with_indent(4, |f| {
             f.indent_here();
             f.format_node(then_body);
-            f.write_str(";\n");
+            f.end_body_line();
         });
         if let Some(eb) = else_body.as_deref() {
             self.indent_here();
@@ -42,11 +49,18 @@ impl Formatter {
             self.with_indent(4, |f| {
                 f.indent_here();
                 f.format_node(eb);
-                f.write_str(";\n");
+                f.end_body_line();
             });
         }
         self.indent_here();
         self.write_str("fi");
+    }
+
+    /// Ends a compound command's body line: bash's `semicolon()` and a
+    /// newline before the closing keyword.
+    fn end_body_line(&mut self) {
+        self.semicolon();
+        self.write_char('\n');
     }
 
     pub(super) fn format_while_until(&mut self, node: &Node, keyword: &str) {
@@ -68,11 +82,18 @@ impl Formatter {
         self.write_str(keyword);
         self.write_char(' ');
         self.format_node(condition);
-        self.write_str("; do\n");
+        self.semicolon();
+        // After heredoc bodies bash starts `do` on its own line.
+        if self.take_was_heredoc() {
+            self.indent_here();
+            self.write_str("do\n");
+        } else {
+            self.write_str(" do\n");
+        }
         self.with_indent(4, |f| {
             f.indent_here();
             f.format_node(body);
-            f.write_str(";\n");
+            f.end_body_line();
         });
         self.indent_here();
         self.write_str("done");
@@ -131,7 +152,7 @@ impl Formatter {
         self.with_indent(4, |f| {
             f.indent_here();
             f.format_node(body);
-            f.write_str(";\n");
+            f.end_body_line();
         });
         self.indent_here();
         self.write_str("done");
@@ -160,7 +181,7 @@ impl Formatter {
         self.with_indent(4, |f| {
             f.indent_here();
             f.format_node(body);
-            f.write_str(";\n");
+            f.end_body_line();
         });
         self.indent_here();
         self.write_str("done");
@@ -242,6 +263,7 @@ impl Formatter {
         self.write_char('\n');
         self.indent_here();
         self.write_char('}');
+        self.take_was_heredoc();
     }
 
     pub(super) fn format_subshell(&mut self, node: &Node) {
@@ -254,6 +276,7 @@ impl Formatter {
         self.write_str("( ");
         self.format_node(body);
         self.write_str(" )");
+        self.take_was_heredoc();
         self.write_trailing_redirects(redirects);
     }
 
@@ -266,7 +289,9 @@ impl Formatter {
         };
         self.write_str("{ ");
         self.format_node(body);
-        self.write_str("; }");
+        self.semicolon();
+        self.write_str(" }");
+        self.take_was_heredoc();
         self.write_trailing_redirects(redirects);
     }
 
