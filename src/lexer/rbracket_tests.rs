@@ -1,6 +1,7 @@
-//! Issue #35: `]]` is only the `DoubleRightBracket` reserved word inside a
-//! `[[ … ]]` conditional. Anywhere else it is an ordinary word, so the
-//! parser does not mistake it for a list terminator.
+//! Issue #35: `]]` is the `DoubleRightBracket` reserved word inside a
+//! `[[ … ]]` conditional and, as in bash, wherever a command may start
+//! (where the parser rejects it). As an argument it is an ordinary word,
+//! so the parser does not mistake it for a list terminator.
 //!
 //! Split from `tests.rs` to keep both files under the project's
 //! file-length limit.
@@ -8,14 +9,15 @@
 use super::test_support::collect_tokens;
 use super::*;
 
-// --- #35: `]]` outside `[[ ]]` is an ordinary word ---------------------
+// --- #35: `]]` outside `[[ ]]` --------------------------------------------
 
 #[test]
-fn rbracket_outside_cond_is_plain_word() {
-    // `]]` at command-start must NOT be classified as DoubleRightBracket.
+fn rbracket_at_command_start_is_reserved() {
+    // bash treats `]]` as a reserved word in command position, so
+    // ` ]] foo` is a syntax error there; the argument after it is a word.
     let tokens = collect_tokens("]] foo");
     assert_eq!(tokens.len(), 2);
-    assert_eq!(tokens[0], (TokenType::Word, "]]".to_string()));
+    assert_eq!(tokens[0], (TokenType::DoubleRightBracket, "]]".to_string()));
     assert_eq!(tokens[1], (TokenType::Word, "foo".to_string()));
 }
 

@@ -132,11 +132,11 @@ impl Lexer {
     /// `reserved_words_ok` (issue #37): once a simple command has
     /// consumed an `AssignmentWord`, bash stops recognising reserved
     /// words in that same command even though we're still at command
-    /// position. Additionally, `]]` is only a reserved word inside a
-    /// `[[ ]]` conditional (issue #35); elsewhere it's an ordinary
-    /// word so the parser doesn't mistake it for a terminator.
+    /// position. Like bash, `]]` is a reserved word in that position too,
+    /// so ` ]] foo` is rejected; as an argument (`echo ]]`) it stays an
+    /// ordinary word (issue #35).
     fn classify_word(&self, wb: &WordBuilder) -> TokenType {
-        let kind = if self.ctx.command_start && self.ctx.reserved_words_ok {
+        if self.ctx.command_start && self.ctx.reserved_words_ok {
             TokenType::reserved_word(&wb.value).unwrap_or_else(|| {
                 if is_assignment_word(&wb.value) {
                     TokenType::AssignmentWord
@@ -148,11 +148,6 @@ impl Lexer {
             TokenType::AssignmentWord
         } else {
             TokenType::Word
-        };
-        if kind == TokenType::DoubleRightBracket && !self.ctx.cond_expr {
-            TokenType::Word
-        } else {
-            kind
         }
     }
 

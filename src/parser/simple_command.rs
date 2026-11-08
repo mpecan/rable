@@ -4,9 +4,9 @@ use crate::ast::{Node, NodeKind, Span};
 use crate::error::{RableError, Result};
 use crate::token::{Token, TokenType};
 
-use super::Parser;
 use super::helpers::{is_fd_number, is_redirect_op_kind, is_varfd};
 use super::word_parts;
+use super::{Parser, unexpected_token};
 
 impl Parser {
     pub(super) fn parse_command(&mut self) -> Result<Node> {
@@ -50,6 +50,9 @@ impl Parser {
             TokenType::Function => self.parse_function(),
             TokenType::Coproc => self.parse_coproc(),
             TokenType::DoubleLeftBracket => self.parse_cond_command(),
+            // `]]` is a reserved word wherever a command may start, and
+            // cannot start one: ` ]] foo` is a syntax error in bash.
+            TokenType::DoubleRightBracket => Err(unexpected_token(self.lexer.peek_token()?)),
             // Closing reserved words that cannot start a command
             TokenType::Fi | TokenType::Done | TokenType::Esac => {
                 let tok = self.lexer.peek_token()?;

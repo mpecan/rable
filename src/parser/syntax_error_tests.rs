@@ -458,3 +458,17 @@ fn and_redirects_take_no_fd_prefix() {
     );
     assert_syntax_error("{ a; } {fd}&>x", 7);
 }
+
+#[test]
+fn rbracket_cannot_start_a_command() {
+    assert_syntax_error("]] foo", 0);
+    assert_syntax_error("a; ]] b", 3);
+    assert_syntax_error("{ ]] a; }", 2);
+    assert_syntax_error("! ]]", 2);
+    // Elsewhere `]]` is an ordinary word.
+    assert_words("echo ]]", &["echo", "]]"]);
+    assert_eq!(
+        sexp("case x in ]]) :;; esac"),
+        r#"(case (word "x") (pattern ((word "]]")) (command (word ":"))))"#
+    );
+}
