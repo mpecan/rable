@@ -7,7 +7,7 @@ Subcommands:
   corpus              every input in tests/parable and tests/oracle
   fuzz                seeded mutations of the corpus (reproducible)
   probe FILE          inputs listed one per line (\\n escapes allowed)
-  snapshot OUT        Rable's own output for corpus + fuzz inputs
+  snapshot OUT        Rable's own output for corpus + fuzz inputs (JSONL)
   compare A B         inputs whose output differs between two snapshots
 
 Every difference has one of three kinds:
@@ -34,32 +34,9 @@ from concurrent.futures import ProcessPoolExecutor
 sys.path.insert(0, os.path.dirname(__file__))
 import fuzz  # noqa: E402
 
-TESTS = os.path.dirname(os.path.abspath(__file__))
-
-
 def load_corpus():
     """Yield (name, source, extglob) for every .tests case in both corpora."""
-    for sub in ("parable", "oracle"):
-        directory = os.path.join(TESTS, sub)
-        for fname in sorted(os.listdir(directory)):
-            if not fname.endswith(".tests"):
-                continue
-            lines = open(os.path.join(directory, fname)).read().split("\n")
-            extglob = False
-            i = 0
-            while i < len(lines):
-                if lines[i].startswith("# @extglob"):
-                    extglob = True
-                if lines[i].startswith("=== "):
-                    name = lines[i][4:]
-                    i += 1
-                    source = []
-                    while i < len(lines) and lines[i] != "---":
-                        source.append(lines[i])
-                        i += 1
-                    text = "\n".join(source)
-                    yield f"{sub}/{fname}::{name}", text, extglob or "# @extglob" in text
-                i += 1
+    return fuzz.load_test_cases(("parable", "oracle"))
 
 
 def fuzz_inputs(n, seed):
@@ -134,38 +111,52 @@ def snapshot_items(n, seed):
     yield from fuzz_inputs(n, seed)
 
 
+def snapshot_one(item):
+    """One snapshot line: the input and Rable's output for it."""
+    _, source, extglob = item
+    out = fuzz.run_rable(source, extglob=extglob)
+    return json.dumps({"source": source, "extglob": extglob, "out": out})
+
+
 def cmd_snapshot(out_path, n, seed):
     """Write Rable's output for every corpus and fuzz input, one JSON line each."""
-    with open(out_path, "w") as out:
-        count = 0
-        for _, source, extglob in snapshot_items(n, seed):
-            out.write(json.dumps(fuzz.run_rable(source, extglob=extglob)) + "\n")
+    count = 0
+    with open(out_path, "w") as out, ProcessPoolExecutor(os.cpu_count()) as pool:
+        for line in pool.map(snapshot_one, snapshot_items(n, seed), chunksize=256):
+            out.write(line + "\n")
             count += 1
     print(f"{count} outputs written to {out_path}")
 
 
-def cmd_compare(before_path, after_path, n, seed):
+def judge_change(change):
+    """Classify one changed output against bash-oracle."""
+    source, extglob, old, new = change
+    oracle = fuzz.normalize(fuzz.run_oracle(source, extglob=extglob))
+    if oracle == fuzz.normalize(new):
+        return "now matches bash"
+    if oracle == fuzz.normalize(old):
+        return "regressed"
+    return "differs both before and after"
+
+
+def cmd_compare(before_path, after_path):
     """List inputs whose Rable output changed, and whether bash agrees with the new one."""
-    sources = [(source, extglob) for _, source, extglob in snapshot_items(n, seed)]
-    before = open(before_path).read().splitlines()
-    after = open(after_path).read().splitlines()
-    if not len(before) == len(after) == len(sources):
-        sys.exit("snapshots were taken with different inputs (-n / --seed)")
-    verdicts = Counter()
-    seen = set()
-    for (source, extglob), old, new in zip(sources, before, after):
-        if old == new or source in seen:
-            continue
-        seen.add(source)
-        oracle = fuzz.normalize(fuzz.run_oracle(source, extglob=extglob))
-        old, new = json.loads(old), json.loads(new)
-        verdict = ("now matches bash" if oracle == fuzz.normalize(new)
-                   else "regressed" if oracle == fuzz.normalize(old)
-                   else "differs both before and after")
-        verdicts[verdict] += 1
+    changes, seen = [], set()
+    with open(before_path) as before, open(after_path) as after:
+        for old_line, new_line in zip(before, after, strict=True):
+            old, new = json.loads(old_line), json.loads(new_line)
+            if old["source"] != new["source"]:
+                sys.exit("snapshots were taken with different inputs (-n / --seed)")
+            if old["out"] != new["out"] and old["source"] not in seen:
+                seen.add(old["source"])
+                changes.append((old["source"], old["extglob"], old["out"], new["out"]))
+    with ProcessPoolExecutor(os.cpu_count()) as pool:
+        verdicts = list(pool.map(judge_change, changes, chunksize=16))
+    for (source, _, old, new), verdict in zip(changes, verdicts):
         print(f"{verdict}: {source!r:.80}\n  before {old[:110]}\n  after  {new[:110]}")
-    print(f"{len(seen)} changed inputs: {dict(verdicts)}")
-    return 1 if verdicts["regressed"] else 0
+    counts = Counter(verdicts)
+    print(f"{len(changes)} changed inputs: {dict(counts)}")
+    return 1 if counts["regressed"] else 0
 
 
 def main():
@@ -173,17 +164,17 @@ def main():
     sub = parser.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("corpus")
     p.add_argument("--out", help="write differences as JSONL")
-    for name in ("fuzz", "snapshot", "compare"):
+    for name in ("fuzz", "snapshot"):
         p = sub.add_parser(name)
         p.add_argument("-n", type=int, default=300000, help="number of mutations")
         p.add_argument("--seed", type=int, default=20261107)
         if name == "fuzz":
             p.add_argument("--out", help="write differences as JSONL")
-        elif name == "snapshot":
-            p.add_argument("out")
         else:
-            p.add_argument("before")
-            p.add_argument("after")
+            p.add_argument("out")
+    p = sub.add_parser("compare")
+    p.add_argument("before")
+    p.add_argument("after")
     sub.add_parser("probe").add_argument("file")
     args = parser.parse_args()
 
@@ -196,7 +187,7 @@ def main():
     elif args.cmd == "snapshot":
         cmd_snapshot(args.out, args.n, args.seed)
     else:
-        return cmd_compare(args.before, args.after, args.n, args.seed)
+        return cmd_compare(args.before, args.after)
     return 0
 
 
