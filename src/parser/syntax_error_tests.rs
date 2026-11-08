@@ -472,3 +472,18 @@ fn rbracket_cannot_start_a_command() {
         r#"(case (word "x") (pattern ((word "]]")) (command (word ":"))))"#
     );
 }
+
+#[test]
+fn command_start_subscript_must_close() {
+    // bash matches `name[` to its `]` across blanks, so these hit EOF.
+    for source in ["foo[0", "foo[0 bar", "a=1 b[0", "x; y[1", "arr=([a"] {
+        assert_unclosed(source);
+    }
+    assert_words("foo[a b]=1", &["foo[a b]=1"]);
+    assert_words("echo foo[0", &["echo", "foo[0"]);
+    // A redirect target is not an assignment, so no subscript there.
+    assert_eq!(
+        sexp("<exp[ 5  3"),
+        r#"(command (word "5") (word "3") (redirect "<" "exp["))"#
+    );
+}

@@ -120,7 +120,8 @@ impl Lexer {
     /// In any other position a bare `[` is just an ordinary character
     /// so the word reader falls through to the `_` arm.
     fn word_enters_bracket_subscript(&self, wb: &WordBuilder) -> bool {
-        (self.ctx.command_start && is_identifier_prefix(&wb.value))
+        // A redirect target is never an assignment: `<exp[ 5` is `exp[`.
+        (self.ctx.command_start && !self.ctx.redirect_target && is_identifier_prefix(&wb.value))
             || (self.ctx.cond_expr && !wb.is_empty() && !wb.ends_with('['))
     }
 
@@ -321,7 +322,13 @@ impl Lexer {
                 }
             }
         }
-        Ok(())
+        // bash matches the subscript to its `]` across blanks and lines,
+        // so `foo[0` and `foo[0 bar` hit end of input.
+        Err(RableError::matched_pair(
+            "unterminated subscript",
+            self.pos,
+            self.line,
+        ))
     }
 
     /// Reads a process substitution into an existing word value.
