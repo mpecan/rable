@@ -96,38 +96,31 @@ impl Parser {
         ))
     }
 
+    /// `a || b || c` nests to the right, as bash's `cond_or` recurses:
+    /// `(cond-or a (cond-or b c))`.
     fn parse_cond_or(&mut self) -> Result<Node> {
-        let mut left = self.parse_cond_and()?;
+        let mut operands = vec![self.parse_cond_and()?];
         while !self.is_cond_close()? && self.peek_is(TokenType::Or)? {
             self.lexer.next_token()?;
-            let right = self.parse_cond_and()?;
-            let span = Span::new(left.span.start, right.span.end);
-            left = Node::new(
-                NodeKind::CondOr {
-                    left: Box::new(left),
-                    right: Box::new(right),
-                },
-                span,
-            );
+            operands.push(self.parse_cond_and()?);
         }
-        Ok(left)
+        Ok(nest_right(operands, |left, right| NodeKind::CondOr {
+            left,
+            right,
+        }))
     }
 
+    /// `a && b && c` nests to the right, as bash's `cond_and` recurses.
     fn parse_cond_and(&mut self) -> Result<Node> {
-        let mut left = self.parse_cond_primary()?;
+        let mut operands = vec![self.parse_cond_primary()?];
         while !self.is_cond_close()? && self.peek_is(TokenType::And)? {
             self.lexer.next_token()?;
-            let right = self.parse_cond_primary()?;
-            let span = Span::new(left.span.start, right.span.end);
-            left = Node::new(
-                NodeKind::CondAnd {
-                    left: Box::new(left),
-                    right: Box::new(right),
-                },
-                span,
-            );
+            operands.push(self.parse_cond_primary()?);
         }
-        Ok(left)
+        Ok(nest_right(operands, |left, right| NodeKind::CondAnd {
+            left,
+            right,
+        }))
     }
 
     fn parse_cond_primary(&mut self) -> Result<Node> {
@@ -256,4 +249,17 @@ impl Parser {
             Ok(Some(()))
         }
     }
+}
+
+/// Folds `a OP b OP c` into `a OP (b OP c)`, iteratively so long chains
+/// cannot exhaust the stack while parsing.
+fn nest_right(mut operands: Vec<Node>, make: fn(Box<Node>, Box<Node>) -> NodeKind) -> Node {
+    let mut right = operands
+        .pop()
+        .unwrap_or_else(|| Node::empty(NodeKind::Empty));
+    while let Some(left) = operands.pop() {
+        let span = Span::new(left.span.start, right.span.end);
+        right = Node::new(make(Box::new(left), Box::new(right)), span);
+    }
+    right
 }

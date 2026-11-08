@@ -429,3 +429,18 @@ fn time_options_then_a_command() {
         r#"(time -p (command (word "--") (word "a")))"#
     );
 }
+
+#[test]
+fn cond_and_or_nest_to_the_right() {
+    // bash's cond_and / cond_or recurse on their right operand.
+    assert_eq!(
+        sexp("[[ a && b && c ]]"),
+        "(cond (cond-and (cond-unary \"-n\" (cond-term \"a\")) (cond-and \
+         (cond-unary \"-n\" (cond-term \"b\")) (cond-unary \"-n\" (cond-term \"c\")))))"
+    );
+    assert_eq!(
+        sexp("[[ a && b || c ]]"),
+        "(cond (cond-or (cond-and (cond-unary \"-n\" (cond-term \"a\")) \
+         (cond-unary \"-n\" (cond-term \"b\"))) (cond-unary \"-n\" (cond-term \"c\"))))"
+    );
+}
