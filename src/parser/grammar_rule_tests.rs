@@ -4,6 +4,7 @@
 //! against bash-oracle.
 
 use super::syntax_test_support::*;
+use crate::ast::{NodeKind, RedirectKind};
 
 // -- array assignments ------------------------------------------------------
 
@@ -226,4 +227,42 @@ fn funsub_is_parsed_as_commands() {
     assert_words("echo ${ }", &["echo", "${ }"]);
     // A plain `${…}` is still a parameter expansion.
     assert_words("echo ${foo}", &["echo", "${foo}"]);
+}
+
+#[test]
+fn redirects_record_what_they_do() {
+    // (source, op, fd, target, kind): a dup/move/close always has its fd.
+    let cases = [
+        ("a > f", ">", -1, "f", RedirectKind::File),
+        ("a >&2", ">&", 1, "2", RedirectKind::Dup),
+        ("a <&$x", "<&", 0, "$x", RedirectKind::Dup),
+        ("a 3<&0-", "<&", 3, "0", RedirectKind::Move),
+        ("a >&-", ">&", 1, "-", RedirectKind::Close),
+        ("a <&-", "<&", 0, "-", RedirectKind::Close),
+        ("a 4>& -", ">&", 4, "-", RedirectKind::Close),
+    ];
+    for (source, op, fd, target, kind) in cases {
+        let nodes = try_parse(source).unwrap_or_default();
+        let Some(NodeKind::Command { redirects, .. }) = nodes.first().map(|n| &n.kind) else {
+            unreachable!("{source:?}: expected a command");
+        };
+        let Some(NodeKind::Redirect {
+            op: got_op,
+            fd: got_fd,
+            target: got_target,
+            kind: got_kind,
+            ..
+        }) = redirects.first().map(|r| &r.kind)
+        else {
+            unreachable!("{source:?}: expected a redirect");
+        };
+        let NodeKind::Word { value, .. } = &got_target.kind else {
+            unreachable!("{source:?}: expected a word target");
+        };
+        assert_eq!(
+            (got_op.as_str(), *got_fd, value.as_str(), *got_kind),
+            (op, fd, target, kind),
+            "{source:?}"
+        );
+    }
 }

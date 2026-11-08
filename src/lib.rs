@@ -78,7 +78,7 @@ pub(crate) mod parser;
 mod python;
 
 // Convenient re-exports
-pub use ast::{CasePattern, ListItem, ListOperator, Node, NodeKind, PipeSep, Span};
+pub use ast::{CasePattern, ListItem, ListOperator, Node, NodeKind, PipeSep, RedirectKind, Span};
 pub use error::{RableError, Result};
 pub use token::{Token, TokenType};
 

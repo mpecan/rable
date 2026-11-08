@@ -1,7 +1,7 @@
 //! Redirect + pipeline formatting. Heredoc bodies are queued on the
 //! [`Formatter`] and written after the next connector's operator.
 
-use crate::ast::{Node, NodeKind};
+use crate::ast::{Node, NodeKind, RedirectKind};
 
 use super::formatter::Formatter;
 use super::words::process_word_value;
@@ -45,50 +45,45 @@ impl Formatter {
             target,
             fd,
             varfd,
+            kind,
         } = &node.kind
         else {
             return;
         };
-        if op == ">&-" {
-            // bash: `N>&-` for every close, whatever its direction.
-            self.write_redirect_fd(varfd.as_deref(), *fd, true);
-            self.write_str(">&-");
-            return;
-        }
-        if op == ">&" || op == "<&" {
-            self.format_dup_redirect(op, target, *fd, varfd.as_deref());
-            return;
-        }
         let NodeKind::Word { value, spans, .. } = &target.kind else {
             return;
         };
-        self.write_redirect_fd(varfd.as_deref(), *fd, *fd != default_fd_for_op(op));
-        self.write_str(op);
-        self.write_char(' ');
-        self.write_str(&process_word_value(value, spans));
-    }
-
-    /// `N>&M`, `N<&M`, and the moves `N>&M-` / `N<&M-`, following bash's
-    /// `print_redirection`: the fd is always printed for a numeric target
-    /// or a move (`>&2` → `1>&2`), and only when not the default for a
-    /// word target (`>&$fd`).
-    fn format_dup_redirect(&mut self, op: &str, target: &Node, fd: i32, varfd: Option<&str>) {
-        let NodeKind::Word { value, spans, .. } = &target.kind else {
-            return;
-        };
-        let moved = value.strip_suffix('-');
-        let target = moved.unwrap_or(value);
-        let number = fd_number(target);
-        let show_fd = moved.is_some() || number.is_some() || fd != default_fd_for_op(op);
-        self.write_redirect_fd(varfd, fd, show_fd);
-        self.write_str(op);
-        match number {
-            Some(n) => self.write_str(&n.to_string()),
-            None if moved.is_some() => self.write_str(target),
-            None => self.write_str(&process_word_value(value, spans)),
-        }
-        if moved.is_some() {
-            self.write_char('-');
+        let varfd = varfd.as_deref();
+        // bash's print_redirection: a close, a move and a numeric dup always
+        // show their fd (`>&2` → `1>&2`, `<&-` → `0>&-`); a dup to a word
+        // and a file redirect only when it is not the operator's default.
+        match kind {
+            RedirectKind::Close => {
+                self.write_redirect_fd(varfd, *fd, true);
+                self.write_str(">&-");
+            }
+            RedirectKind::Move => {
+                self.write_redirect_fd(varfd, *fd, true);
+                self.write_str(op);
+                self.write_str(&fd_number(value).map_or_else(|| value.clone(), |n| n.to_string()));
+                self.write_char('-');
+            }
+            RedirectKind::Dup => {
+                let number = fd_number(value);
+                let show_fd = number.is_some() || *fd != default_fd_for_op(op);
+                self.write_redirect_fd(varfd, *fd, show_fd);
+                self.write_str(op);
+                match number {
+                    Some(n) => self.write_str(&n.to_string()),
+                    None => self.write_str(&process_word_value(value, spans)),
+                }
+            }
+            RedirectKind::File => {
+                self.write_redirect_fd(varfd, *fd, *fd != default_fd_for_op(op));
+                self.write_str(op);
+                self.write_char(' ');
+                self.write_str(&process_word_value(value, spans));
+            }
         }
     }
 

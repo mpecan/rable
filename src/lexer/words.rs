@@ -441,11 +441,11 @@ pub(crate) fn fd_number(s: &str) -> Option<i32> {
 }
 
 /// The fd a redirect operator acts on when none is written: 1 for output
-/// (`>`, `>&`, `>&-`, …), 0 for input; -1 for operators without one.
+/// (`>`, `>&`, …), 0 for input; -1 for operators without one.
 pub(crate) const fn default_fd_for_op(op: &str) -> i32 {
     match op.as_bytes() {
-        b">" | b">>" | b">|" | b">&" | b">&-" => 1,
-        b"<" | b"<&" | b"<>" | b"<&-" => 0,
+        b">" | b">>" | b">|" | b">&" => 1,
+        b"<" | b"<&" | b"<>" => 0,
         _ => -1,
     }
 }

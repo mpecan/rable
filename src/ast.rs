@@ -196,6 +196,10 @@ pub enum NodeKind {
     // -- Redirections --
     /// I/O redirection: `[fd]op target`
     ///
+    /// `op` is the operator as written (`>`, `>>`, `>&`, `<&`, …); `kind`
+    /// says what it does. For a dup, move or close, `fd` is always the fd
+    /// acted on (`>&2` has `fd` 1); otherwise it is -1 unless written. A
+    /// move's `target` has no trailing `-`, and a close's target is `-`.
     /// `varfd` holds the variable name when the source used the
     /// `{name}op` form (e.g. `{fd}>file`). It is `None` for plain
     /// numeric or default-fd redirects.
@@ -204,6 +208,7 @@ pub enum NodeKind {
         target: Box<Node>,
         fd: i32,
         varfd: Option<String>,
+        kind: RedirectKind,
     },
 
     /// Here-document: `<<[-]DELIM\ncontent\nDELIM`
@@ -384,6 +389,21 @@ pub enum NodeKind {
 }
 
 /// Operator between commands in a list.
+/// What a redirect does, as bash's redirect instructions distinguish
+/// them (`r_duplicating_output`, `r_move_input`, `r_close_this`, …).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RedirectKind {
+    /// To or from a file, or a here-string: `>`, `<`, `>>`, `<>`, `>|`,
+    /// `&>`, `&>>`, `<<<`.
+    File,
+    /// `N>&M` / `N<&M`: make fd N a copy of M (a number or a word).
+    Dup,
+    /// `N>&M-` / `N<&M-`: move M to N.
+    Move,
+    /// `N>&-` / `N<&-`: close fd N.
+    Close,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ListOperator {
     /// `&&`

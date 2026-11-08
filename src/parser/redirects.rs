@@ -1,7 +1,7 @@
 //! Redirection parsing: `<`, `>`, `>>`, `<&`, `>&`, `<>`, `>|`,
 //! `&>`, `&>>`, `<<`, `<<-`, and `<<<`, plus heredoc queuing.
 
-use crate::ast::{Node, NodeKind};
+use crate::ast::{Node, NodeKind, RedirectKind};
 use crate::error::{RableError, Result};
 use crate::lexer::default_fd_for_op;
 use crate::lexer::heredoc::parse_heredoc_delimiter;
@@ -15,7 +15,7 @@ use super::{Parser, unexpected_token};
 impl Parser {
     pub(super) fn parse_redirect(&mut self) -> Result<Node> {
         let op_tok = self.lexer.next_token()?;
-        self.build_redirect(op_tok, -1, None)
+        self.build_redirect(&op_tok, -1, None)
     }
 
     pub(super) fn parse_redirect_with_fd(&mut self, fd_tok: &Token) -> Result<Node> {
@@ -24,7 +24,7 @@ impl Parser {
             .parse()
             .map_err(|_| RableError::parse("invalid fd number", fd_tok.pos, fd_tok.line))?;
         let op_tok = self.lexer.next_token()?;
-        self.build_redirect(op_tok, fd, None)
+        self.build_redirect(&op_tok, fd, None)
     }
 
     /// Parses a `{name}op target` redirect. `varfd_tok.value` is the
@@ -38,74 +38,52 @@ impl Parser {
             .unwrap_or(raw)
             .to_string();
         let op_tok = self.lexer.next_token()?;
-        self.build_redirect(op_tok, -1, Some(name))
+        self.build_redirect(&op_tok, -1, Some(name))
     }
 
     pub(super) fn build_redirect(
         &mut self,
-        op_tok: Token,
+        op_tok: &Token,
         fd: i32,
         varfd: Option<String>,
     ) -> Result<Node> {
         if op_tok.kind == TokenType::DoubleLess || op_tok.kind == TokenType::DoubleLessDash {
-            return self.build_heredoc_redirect(&op_tok, fd);
+            return self.build_heredoc_redirect(op_tok, fd);
         }
 
         let start = op_tok.pos;
         let is_dup = op_tok.kind == TokenType::GreaterAnd || op_tok.kind == TokenType::LessAnd;
+        // `>&-` / `<&-` are one token; the operator is `>&` / `<&`.
+        let op = op_tok.value.trim_end_matches('-').to_string();
         // Dup, move and close redirects always act on a definite fd, which
         // bash prints (`>&2` is `1>&2`): resolve the default here.
         let fd = if is_dup && fd == -1 {
-            default_fd_for_op(&op_tok.value)
+            default_fd_for_op(&op)
         } else {
             fd
         };
-        // >&- and <&- are complete close-fd operators (no target needed)
-        if op_tok.value == ">&-" || op_tok.value == "<&-" {
-            return Ok(self.close_fd_redirect(start, fd, varfd));
+        let redirect = |target: Node, kind| NodeKind::Redirect {
+            op,
+            target: Box::new(target),
+            fd,
+            varfd,
+            kind,
+        };
+        if op_tok.value.ends_with('-') {
+            return Ok(self.spanned(start, redirect(word_node("-"), RedirectKind::Close)));
         }
-
         let target_tok = self.expect_word()?;
-        if is_dup && target_tok.value == "-" {
-            return Ok(self.close_fd_redirect(start, fd, varfd));
-        }
-        // `N<&M-` moves fd M to N. The target keeps its `-`, as written;
-        // the S-expression output drops it, the reformatter prints it.
-        if is_dup && target_tok.value.ends_with('-') {
-            return Ok(self.spanned(
-                start,
-                NodeKind::Redirect {
-                    op: op_tok.value,
-                    target: Box::new(word_node(&target_tok.value)),
-                    fd,
-                    varfd,
-                },
-            ));
-        }
-
-        Ok(self.spanned(
-            start,
-            NodeKind::Redirect {
-                op: op_tok.value,
-                target: Box::new(word_node_from_token(target_tok)),
-                fd,
-                varfd,
-            },
-        ))
-    }
-
-    /// A close-fd redirect (`N>&-` / `N<&-`). bash-oracle dumps every
-    /// close as `>&-` with a `0` placeholder target; `fd` keeps the fd.
-    fn close_fd_redirect(&self, start: usize, fd: i32, varfd: Option<String>) -> Node {
-        self.spanned(
-            start,
-            NodeKind::Redirect {
-                op: ">&-".to_string(),
-                target: Box::new(word_node("0")),
-                fd,
-                varfd,
-            },
-        )
+        let kind = match target_tok.value.as_str() {
+            _ if !is_dup => RedirectKind::File,
+            "-" => RedirectKind::Close,
+            // `N<&M-` moves M to N; the target is `M`.
+            value if value.ends_with('-') => {
+                let moved = word_node(&value[..value.len() - 1]);
+                return Ok(self.spanned(start, redirect(moved, RedirectKind::Move)));
+            }
+            _ => RedirectKind::Dup,
+        };
+        Ok(self.spanned(start, redirect(word_node_from_token(target_tok), kind)))
     }
 
     fn build_heredoc_redirect(&mut self, op_tok: &Token, fd: i32) -> Result<Node> {
