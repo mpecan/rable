@@ -89,7 +89,6 @@ src/
   ast.rs              AST node types (NodeKind enum with 50+ variants)
   token.rs            Token types and lexer output
   error.rs            Error types (ParseError, MatchedPairError)
-  context.rs          Parsing context and state management
   lexer/              Context-sensitive tokenizer
     mod.rs              Main lexer loop
     quotes.rs           Quote and escape handling
