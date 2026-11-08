@@ -5,9 +5,9 @@ use crate::ast::{Node, NodeKind};
 use crate::error::Result;
 use crate::token::{Token, TokenType};
 
-use super::Parser;
 use super::arithmetic::parse_arith_expression;
 use super::helpers::{is_redirect_op_kind, word_node_from_token};
+use super::{Parser, unexpected_token};
 
 impl Parser {
     pub(super) fn parse_subshell(&mut self) -> Result<Node> {
@@ -47,11 +47,12 @@ impl Parser {
     pub(super) fn parse_function(&mut self) -> Result<Node> {
         let start = self.peek_pos()?;
         self.expect(TokenType::Function)?;
-        let name_tok = self.lexer.next_token()?;
+        let name_tok = self.expect_word()?;
         let name = name_tok.value;
 
         self.lexer.set_command_start();
-        if self.peek_is(TokenType::LeftParen)? {
+        // `function f (( x ))` has an arithmetic body, not a subshell.
+        if self.peek_is(TokenType::LeftParen)? && !self.is_double_paren()? {
             self.lexer.next_token()?;
             if self.peek_is(TokenType::RightParen)? {
                 // function f() { ... } — empty parens syntax
@@ -80,7 +81,7 @@ impl Parser {
         }
 
         self.skip_newlines()?;
-        let body = self.parse_command()?;
+        let body = self.parse_function_body()?;
 
         Ok(self.spanned(
             start,
@@ -97,7 +98,7 @@ impl Parser {
         self.expect(TokenType::RightParen)?;
         self.lexer.set_command_start();
         self.skip_newlines()?;
-        let body = self.parse_command()?;
+        let body = self.parse_function_body()?;
 
         Ok(self.spanned(
             start,
@@ -106,6 +107,16 @@ impl Parser {
                 body: Box::new(body),
             },
         ))
+    }
+
+    /// Parses a function body, which bash requires to be a compound
+    /// command: `f() echo`, `f()` and `f() g() { …; }` are syntax errors.
+    fn parse_function_body(&mut self) -> Result<Node> {
+        let tok = self.lexer.peek_token()?;
+        if !tok.kind.starts_compound_command() {
+            return Err(unexpected_token(tok));
+        }
+        self.parse_command()
     }
 
     pub(super) fn parse_coproc(&mut self) -> Result<Node> {
@@ -121,11 +132,11 @@ impl Parser {
 
         // Path B: `coproc <redir ...` — synthetic command starting with a
         // redirect. The redirect target must not be re-armed as a command
-        // start, so this check comes before `set_command_start`.
+        // start, so this check comes before `allow_command_after_word`.
         if is_redirect_op_kind(first_tok.kind) {
             return self.parse_coproc_redirect_first(start, first_tok);
         }
-        self.lexer.set_command_start();
+        self.lexer.allow_command_after_word();
 
         // Path C: `coproc NAME CMD` — named coproc, `first_tok` is the name.
         if coproc_starts_command(self.lexer.peek_token()?.kind) {
@@ -254,8 +265,9 @@ impl Parser {
 }
 
 /// Returns true when `kind` can start a command at the body position of a
-/// `coproc` clause. Excludes `coproc`, `time`, and `!` since they would
-/// cause re-entry into `parse_coproc` or ambiguous negation.
+/// `coproc` clause: a compound command or a function definition. Not
+/// `coproc`, `time` or `!`, which would re-enter `parse_coproc` or make
+/// the negation ambiguous.
 const fn coproc_starts_command(kind: TokenType) -> bool {
-    kind.starts_command() && !matches!(kind, TokenType::Coproc | TokenType::Time | TokenType::Bang)
+    kind.starts_compound_command() || matches!(kind, TokenType::Function)
 }

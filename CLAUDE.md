@@ -2,7 +2,7 @@
 
 ## Constitution
 
-1. **Compatibility is correctness** — output must match Parable's S-expressions exactly
+1. **Compatibility is correctness** — bash-oracle is the reference: output must match its S-expressions exactly. Parable's corpus is the main test suite, but where Parable and bash-oracle disagree, bash wins
 2. **If it is not tested, it is not shipped** — every feature has unit and integration tests
 3. **Simplicity is king** — solve problems with least complexity
 4. **Correctness over speed** — match bash-oracle behavior, optimize later
@@ -13,7 +13,7 @@
 - **Library name**: `rable`
 - **Purpose**: Complete GNU Bash 5.3-compatible parser, Rust implementation of Parable
 - **Input**: Bash source string
-- **Output**: AST nodes with S-expression serialization matching Parable exactly
+- **Output**: AST nodes with S-expression serialization in Parable's format, matching bash-oracle exactly
 - **Python bindings**: Via PyO3/maturin (feature-gated under `python`)
 
 ## Architecture
@@ -89,3 +89,12 @@ bash source code
 Run with `cargo test`. The test runner reads `.tests` files, parses input, compares S-expression output.
 
 Oracle tests in `tests/oracle/` provide additional coverage from bash-oracle fuzzing. Run with `just test-oracle`.
+
+Check an expected S-expression against bash-oracle (build it with `just build-oracle`):
+```sh
+printf '%s' 'echo $(a;b)' | ~/source/bash-oracle/bash-oracle --dump-ast
+# (command (word "echo") (word "$(a; b)"))
+```
+Add `-O extglob` after `--dump-ast` for extglob inputs. When a `tests/parable/` case disagrees
+with bash-oracle, change its expectation to bash's output and put a
+`# Diverges from upstream Parable` comment above it saying why.

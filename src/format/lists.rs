@@ -1,15 +1,12 @@
 //! List-operator (`;`, `&&`, `||`, `&`) formatting for the reformatter,
-//! including the trailing-operator-before-heredoc special case.
+//! including operators that follow a command with heredoc bodies.
 
 use crate::ast::{ListItem, ListOperator};
 
 use super::formatter::Formatter;
-use super::redirects::has_heredoc_redirect_deep;
 
 /// Returns the canonical surface syntax for a list operator, with
-/// surrounding spaces as bash's canonical form prescribes. Shared
-/// between `write_list_op` and the heredoc post-hoc insert in
-/// `insert_op_before_heredoc`.
+/// surrounding spaces as bash's canonical form prescribes.
 pub(super) const fn list_op_str(op: ListOperator) -> &'static str {
     match op {
         ListOperator::And => " && ",
@@ -28,47 +25,45 @@ impl Formatter {
     pub(super) fn format_list(&mut self, items: &[ListItem]) {
         for (i, item) in items.iter().enumerate() {
             if i > 0 {
-                // Write the operator from the *previous* item
-                if let Some(op) = items[i - 1].operator {
-                    let has_heredoc = has_heredoc_redirect_deep(&items[i - 1].command);
-                    if op == ListOperator::Semi && has_heredoc {
-                        self.write_char('\n');
-                    } else {
-                        self.write_list_op(op);
-                    }
-                } else {
-                    self.write_str("; ");
+                match items[i - 1].operator {
+                    Some(op) => self.write_list_connector(op),
+                    None => self.write_str("; "),
                 }
             }
             self.format_node(&item.command);
         }
-        // Write trailing operator on the last item (e.g., `cmd &`)
-        if let Some(last) = items.last()
-            && let Some(op) = last.operator
-        {
-            if has_heredoc_redirect_deep(&last.command) {
-                self.insert_op_before_heredoc(op);
-            } else {
-                self.write_list_op(op);
+        // Trailing operator on the last item (e.g., `cmd &`)
+        if let Some(op) = items.last().and_then(|item| item.operator) {
+            self.write_trailing_list_op(op);
+        }
+    }
+
+    /// Writes the operator between two list items. As bash's
+    /// `print_deferred_heredocs` does, the operator comes before any
+    /// pending heredoc bodies and a space follows them, two after `&`:
+    /// `a <<E && b` → `a <<E && \nx\nE\n b`.
+    fn write_list_connector(&mut self, op: ListOperator) {
+        match op {
+            ListOperator::Semi if self.has_pending_heredocs() => self.write_char('\n'),
+            ListOperator::Semi => self.write_list_op(op),
+            ListOperator::Background => {
+                self.write_before_heredocs(" &");
+                self.write_char(' ');
+            }
+            ListOperator::And | ListOperator::Or => {
+                self.write_before_heredocs(list_op_str(op));
             }
         }
     }
 
-    /// Inserts a trailing operator (like `&`) on the delimiter line
-    /// before the heredoc content, rather than after it.
-    fn insert_op_before_heredoc(&mut self, op: ListOperator) {
-        // The output currently ends with: `<<delim\ncontent\ndelim\n`
-        // Find the first `\n` after the `<<` delimiter line to insert
-        // the operator there: `<<delim &\ncontent\ndelim\n`
-        if let Some(heredoc_pos) = self.out().rfind("<<")
-            && let Some(nl_pos) = self.out()[heredoc_pos..].find('\n')
-        {
-            let insert_at = heredoc_pos + nl_pos;
-            self.insert_at(insert_at, list_op_str(op).trim_end());
-            return;
+    /// Writes the last item's operator. After heredoc bodies `&` keeps
+    /// bash's space (`$(cmd <<E &\nx\nE\n )`) and `;` prints nothing.
+    fn write_trailing_list_op(&mut self, op: ListOperator) {
+        if !self.has_pending_heredocs() {
+            self.write_list_op(op);
+        } else if op != ListOperator::Semi {
+            self.write_before_heredocs(list_op_str(op).trim_end());
         }
-        // Fallback: just append
-        self.write_list_op(op);
     }
 
     fn write_list_op(&mut self, op: ListOperator) {

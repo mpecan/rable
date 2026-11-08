@@ -1,6 +1,6 @@
 # Contributing to Rable
 
-Thank you for your interest in contributing to Rable! This project is a Rust reimplementation of [Parable](https://github.com/ldayton/Parable), and we take compatibility with Parable's output very seriously.
+Thank you for your interest in contributing to Rable! This project is a Rust reimplementation of [Parable](https://github.com/ldayton/Parable). It emits Parable's S-expression format, and bash itself, via [bash-oracle](https://github.com/ldayton/bash-oracle), decides what that output must be: where Parable and bash-oracle disagree, bash wins.
 
 ## Getting Started
 
@@ -63,7 +63,11 @@ These are enforced by clippy and rustfmt — `just check` will catch violations.
 
 2. **Implement** the lexer/parser/formatter changes needed
 
-3. **Verify** that the S-expression output matches Parable's — use Parable's `bash-oracle` if unsure
+3. **Verify** the expected S-expression against bash-oracle (`just build-oracle` once, then
+   `printf '%s' 'your input' | ~/source/bash-oracle/bash-oracle --dump-ast`). bash-oracle wins
+   any disagreement with Parable. If an existing `tests/parable/` case disagrees with it, change
+   the expectation to bash's output and add a `# Diverges from upstream Parable` comment above
+   the case explaining why
 
 4. **Run the full suite**: `just test-parable` must show 1604/1604 (or more, if you added tests)
 
@@ -134,7 +138,7 @@ just benchmark      # compare performance
 
 ## Fuzzing
 
-Rable includes a differential fuzzer that compares output against Parable to catch edge-case divergences:
+Rable includes a differential fuzzer that compares output against bash-oracle (or Parable, if bash-oracle isn't built) to catch edge-case divergences:
 
 ```bash
 just setup                    # one-time Python environment setup

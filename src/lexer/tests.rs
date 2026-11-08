@@ -1,4 +1,4 @@
-use super::test_support::collect_tokens;
+use super::test_support::{collect_tokens, collect_tokens_with};
 use super::*;
 
 #[test]
@@ -252,7 +252,7 @@ fn extglob_with_alternation_is_one_word() {
     // The `|` arm inside `read_matched_parens_inner` must treat
     // alternation as a word-boundary character without breaking
     // paren depth. Regression guard for issue #53.
-    let tokens = collect_tokens("@(foo|bar|baz)");
+    let tokens = collect_tokens_with("@(foo|bar|baz)", true);
     assert_eq!(tokens.len(), 1, "tokens = {tokens:?}");
     assert_eq!(tokens[0].0, TokenType::Word);
     assert_eq!(tokens[0].1, "@(foo|bar|baz)");
@@ -264,7 +264,7 @@ fn empty_extglob_closes_at_immediate_right_paren() {
     // with an empty body — `handle_paren_close` hits `depth == 0`
     // immediately and returns `Break`. Regression guard for
     // issue #53.
-    let tokens = collect_tokens("@()");
+    let tokens = collect_tokens_with("@()", true);
     assert_eq!(tokens.len(), 1, "tokens = {tokens:?}");
     assert_eq!(tokens[0].0, TokenType::Word);
     assert_eq!(tokens[0].1, "@()");
@@ -308,13 +308,11 @@ fn paren_content_comment_stops_at_newline() {
 
 #[test]
 fn extglob_disabled_does_not_absorb_paren() {
-    // With `extglob=false`, the config-gated extglob prefixes `!(…)`
-    // and `*(…)` must NOT tokenize as single extglob words. The `(`
-    // must appear as a distinct `LeftParen` token instead of being
-    // absorbed into the word. Guards the `config.extglob` branch of
-    // `is_extglob_trigger`, which is otherwise only covered by
-    // integration tests that enable extglob.
-    for src in ["!(cmd)", "foo*(bar)"] {
+    // With `extglob=false`, no extglob prefix (`@ ? + ! *`) may absorb
+    // a following `(` into the word: bash rejects `@(a|b)` then. The `(`
+    // must appear as a distinct `LeftParen` token. Guards the
+    // `config.extglob` check in `is_extglob_trigger`.
+    for src in ["!(cmd)", "foo*(bar)", "@(a|b)", "x?(a)", "+(a)"] {
         let tokens = collect_tokens(src);
         let has_left_paren = tokens.iter().any(|(k, _)| *k == TokenType::LeftParen);
         assert!(

@@ -67,15 +67,6 @@ pub fn reformat_bash(source: &str) -> Option<String> {
     }
     let _guard = DepthGuard::enter()?;
 
-    // Always try to reformat if the content has any operators or special syntax.
-    // The DepthGuard prevents recursion, and the 1000-char limit handles performance.
-    let dominated_by_words = source
-        .chars()
-        .all(|c| c.is_alphanumeric() || c == ' ' || c == '_' || c == '-' || c == '.' || c == '/');
-    if dominated_by_words {
-        return None;
-    }
-
     let mut lexer = crate::lexer::Lexer::new(source, false);
     lexer.set_mode(crate::lexer::LexerMode::Cmdsub);
     let mut parser = crate::parser::Parser::new(lexer);
@@ -97,8 +88,6 @@ pub fn reformat_bash(source: &str) -> Option<String> {
 mod tests {
     use super::reformat_bash;
 
-    /// `reformat_bash` bails out early on word-only input, so every case
-    /// here carries at least one operator.
     fn reformat(source: &str) -> String {
         let Some(out) = reformat_bash(source) else {
             unreachable!("expected {source:?} to be reformatted");
@@ -107,18 +96,28 @@ mod tests {
     }
 
     #[test]
-    fn plain_word_input_is_left_alone() {
-        // Reformatting is skipped when the content is nothing but word
-        // characters — there is no layout to canonicalize, and re-emitting
-        // it risks perturbing text the corpus expects verbatim. Each
-        // character class in that predicate is checked on its own.
-        for source in ["a b", "a_b", "a-b", "a.b", "a/b", "path/to/file-1.txt v2"] {
-            assert!(
-                reformat_bash(source).is_none(),
-                "expected {source:?} to be left alone"
-            );
-        }
-        // One operator is enough to opt back in.
+    fn bare_negation_and_time_keep_their_space() {
+        // bash prints `! ` / `time ` before the (empty) command: `$(! )`.
+        assert_eq!(reformat("! ;"), "! ");
+        assert_eq!(reformat("a && time ;"), "a && time ");
+        assert_eq!(reformat("! ; b"), "! ; b");
+    }
+
+    #[test]
+    fn time_is_printed_before_negation() {
+        assert_eq!(reformat("! time a"), "time ! a");
+        assert_eq!(reformat("time ! a"), "time ! a");
+        assert_eq!(reformat("! time -p a"), "time -p ! a");
+    }
+
+    #[test]
+    fn plain_word_input_is_normalized_too() {
+        // bash reprints word-only content as well: blanks collapse, and
+        // `time --` is its `-p` form.
+        assert_eq!(reformat("a  b"), "a b");
+        assert_eq!(reformat("path/to/file-1.txt v2"), "path/to/file-1.txt v2");
+        assert_eq!(reformat("time  -p a"), "time -p a");
+        assert_eq!(reformat("time -- a"), "time -p a");
         assert_eq!(reformat("a;b"), "a; b");
     }
 
@@ -178,12 +177,28 @@ mod tests {
     #[test]
     fn trailing_operator_lands_on_the_heredoc_delimiter_line() {
         // `&` belongs on the line that opens the heredoc, not after its
-        // body. Locating that heredoc means looking through the pipeline
-        // to its last command.
+        // body, and bash keeps a space after the body (`$(… )`). Locating
+        // that heredoc means looking through the pipeline to its last
+        // command.
         assert_eq!(
             reformat("a | cat <<EOF &\nbody\nEOF"),
-            "a | cat <<EOF &\nbody\nEOF\n"
+            "a | cat <<EOF &\nbody\nEOF\n "
         );
+    }
+
+    #[test]
+    fn list_operator_after_heredoc_precedes_its_body() {
+        // bash's print_deferred_heredocs: operator, bodies, then a space;
+        // `&` followed by a command gets two.
+        assert_eq!(reformat("a <<E && b\nx\nE"), "a <<E && \nx\nE\n b");
+        assert_eq!(reformat("a <<E || b\nx\nE"), "a <<E || \nx\nE\n b");
+        assert_eq!(
+            reformat("cat <<E & cat <<F &\nb\nE\nc\nF"),
+            "cat <<E &\nb\nE\n  cat <<F &\nc\nF\n "
+        );
+        // The operator goes where the bodies start, even if a body
+        // itself contains `<<`.
+        assert_eq!(reformat("cat <<E &\na <<b\nE"), "cat <<E &\na <<b\nE\n ");
     }
 
     #[test]

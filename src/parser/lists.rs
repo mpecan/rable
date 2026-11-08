@@ -2,12 +2,12 @@
 //! and/or (`&&`/`||`), and pipelines (`|`/`|&`, plus `!` and `time`).
 
 use crate::ast::{ListItem, ListOperator, Node, NodeKind, PipeSep, Span};
-use crate::error::{RableError, Result};
+use crate::error::Result;
 use crate::lexer::LexerMode;
 use crate::token::TokenType;
 
-use super::Parser;
 use super::helpers::{add_stderr_redirect, make_stderr_redirect, word_node_from_token};
+use super::{Parser, unexpected_token};
 
 /// Creates a binary list node: `left op right`.
 fn make_list(left: Node, op: ListOperator, right: Node) -> Node {
@@ -192,10 +192,21 @@ impl Parser {
 
     /// Parses a pipeline that must contain a command. An empty command is a
     /// syntax error here (`ls && && x`, `; x`); only `!` and `time` may
-    /// stand alone, which `parse_pipeline_or_empty` allows.
+    /// stand alone, which `parse_pipeline_or_empty` allows — and then,
+    /// as in bash, only before `;`, `&`, a newline or end of input:
+    /// `! && x`, `{ x; ! }` and `$(time)` are syntax errors.
     fn parse_pipeline(&mut self) -> Result<Node> {
         let node = self.parse_pipeline_or_empty()?;
         self.ensure_command(Some(&node))?;
+        if is_bare_prefix(&node) {
+            let tok = self.lexer.peek_token()?;
+            if !matches!(
+                tok.kind,
+                TokenType::Semi | TokenType::Ampersand | TokenType::Newline | TokenType::Eof
+            ) {
+                return Err(unexpected_token(tok));
+            }
+        }
         Ok(node)
     }
 
@@ -218,12 +229,7 @@ impl Parser {
 
         if self.lexer.peek_token()?.kind == TokenType::Time {
             self.lexer.next_token()?;
-            let posix = if self.check_word("-p")? {
-                self.lexer.next_token()?;
-                true
-            } else {
-                false
-            };
+            let posix = self.consume_time_options()?;
             if self.lexer.peek_token()?.kind == TokenType::Bang {
                 self.lexer.next_token()?;
                 let p = self.parse_pipeline_inner()?;
@@ -251,6 +257,22 @@ impl Parser {
         }
 
         self.parse_pipeline_inner()
+    }
+
+    /// Consumes `time`'s options: an optional `-p`, then an optional `--`.
+    /// Either one makes bash report the POSIX form (`time -- a` dumps as
+    /// `time -p`). A command still follows, so reserved words are
+    /// recognised again: `time -p ! a`, `time -p { a; }`.
+    fn consume_time_options(&mut self) -> Result<bool> {
+        let mut posix = false;
+        for option in ["-p", "--"] {
+            if self.check_word(option)? {
+                self.lexer.next_token()?;
+                self.lexer.set_command_start();
+                posix = true;
+            }
+        }
+        Ok(posix)
     }
 
     fn parse_pipeline_inner(&mut self) -> Result<Node> {
@@ -311,13 +333,7 @@ impl Parser {
         if !node.is_some_and(|n| matches!(n.kind, NodeKind::Empty)) {
             return Ok(());
         }
-        let tok = self.lexer.peek_token()?;
-        let message = if tok.kind == TokenType::Eof {
-            "syntax error: unexpected end of input".to_string()
-        } else {
-            format!("syntax error near unexpected token '{}'", tok.value)
-        };
-        Err(RableError::parse(message, tok.pos, tok.line))
+        Err(unexpected_token(self.lexer.peek_token()?))
     }
 
     fn check_word(&mut self, expected: &str) -> Result<bool> {
@@ -385,5 +401,15 @@ impl Parser {
         };
         self.leave();
         result
+    }
+}
+
+/// True for `!` / `time` (in any combination) with no pipeline after them.
+fn is_bare_prefix(node: &Node) -> bool {
+    match &node.kind {
+        NodeKind::Negation { pipeline } | NodeKind::Time { pipeline, .. } => {
+            matches!(pipeline.kind, NodeKind::Empty) || is_bare_prefix(pipeline)
+        }
+        _ => false,
     }
 }

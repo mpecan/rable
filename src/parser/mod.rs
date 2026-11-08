@@ -114,11 +114,7 @@ impl Parser {
             // and `echo a (x)` are syntax errors in bash.
             let next = self.lexer.peek_token()?;
             if !matches!(next.kind, TokenType::Newline | TokenType::Eof) {
-                return Err(RableError::parse(
-                    format!("syntax error near unexpected token '{}'", next.value),
-                    next.pos,
-                    next.line,
-                ));
+                return Err(unexpected_token(next));
             }
             self.skip_newlines()?;
             fill_heredoc_contents(&mut node, &mut self.lexer);
@@ -195,6 +191,18 @@ impl Parser {
         Ok(tok)
     }
 
+    /// Consumes the next token, which the grammar requires to be a WORD.
+    /// Operators, newlines and end of input are syntax errors rather than
+    /// being turned into word nodes.
+    pub(super) fn expect_word(&mut self) -> Result<Token> {
+        let tok = self.lexer.next_token()?;
+        if tok.kind.is_word_like() {
+            Ok(tok)
+        } else {
+            Err(unexpected_token(&tok))
+        }
+    }
+
     /// Expects a closing delimiter — matches either the specific token type
     /// or a Word with the given value. Used for `}` and `]]` which can be
     /// either dedicated tokens or plain words depending on context.
@@ -267,7 +275,7 @@ impl Parser {
             ) {
                 break;
             }
-            let tok = self.lexer.next_token()?;
+            let tok = self.expect_word()?;
             ws.push(word_node_from_token(tok));
         }
         Ok(ws)
@@ -292,3 +300,14 @@ mod span_tests;
 mod syntax_error_tests;
 #[cfg(test)]
 mod tests;
+
+/// Bash's "syntax error near unexpected token" for `tok`, naming end of
+/// input the way `ensure_command` does.
+pub fn unexpected_token(tok: &Token) -> RableError {
+    let message = if tok.kind == TokenType::Eof {
+        "syntax error: unexpected end of input".to_string()
+    } else {
+        format!("syntax error near unexpected token '{}'", tok.value)
+    };
+    RableError::parse(message, tok.pos, tok.line)
+}

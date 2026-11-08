@@ -4,6 +4,7 @@ use crate::error::{RableError, Result};
 use crate::token::{Token, TokenType};
 
 use super::Lexer;
+use super::assignment::{is_assignment_builtin, is_assignment_word};
 use super::word_builder::{WordBuilder, WordSpanKind};
 
 impl Lexer {
@@ -55,7 +56,10 @@ impl Lexer {
         }
 
         let kind = self.classify_word(&wb);
-        self.advance_word_context(kind);
+        // A redirect fd prefix: `2>`, `{fd}>`.
+        let fd_prefix = matches!(self.peek_char(), Some('<' | '>'))
+            && (is_fd_number(&wb.value) || is_varfd(&wb.value));
+        self.advance_word_context(kind, &wb.value, fd_prefix);
         Ok(Token::with_spans(kind, wb.value, start, line, wb.spans))
     }
 
@@ -77,23 +81,19 @@ impl Lexer {
 
     /// Handles `(` encountered mid-word. Three outcomes:
     ///
-    /// * preceded by `=` — array assignment `arr=(…)`; consume the
+    /// * preceded by `name=` / `name+=` / `name[sub]=` where an assignment
+    ///   is allowed — array assignment `arr=(…)`; consume the
     ///   parenthesised element list and keep reading.
-    /// * preceded by an extglob prefix (`@`, `?`, `+`, or `!`/`*` when
-    ///   extglob is on) — extglob pattern `@(…)`, `*(…)`, etc.
+    /// * preceded by an extglob prefix (`@ ? + ! *`) when extglob is on
+    ///   — extglob pattern `@(…)`, `*(…)`, etc.
     /// * otherwise `(` is a metacharacter that terminates the word.
     fn read_open_paren_word(&mut self, wb: &mut WordBuilder) -> Result<ControlFlow<()>> {
-        if wb.ends_with('=') {
+        if wb.ends_with('=') && self.array_assignment_allowed(wb) {
             self.advance_char();
             wb.push('(');
             self.read_array_elements(wb)?;
             Ok(ControlFlow::Continue(()))
-        } else if wb.ends_with('@')
-            || wb.ends_with('?')
-            || wb.ends_with('+')
-            || (wb.ends_with('!') && self.config.extglob)
-            || (wb.ends_with('*') && self.config.extglob)
-        {
+        } else if self.config.extglob && wb.value.ends_with(['@', '?', '+', '!', '*']) {
             self.advance_char();
             wb.push('(');
             self.read_matched_parens(wb, 1)?;
@@ -104,13 +104,13 @@ impl Lexer {
     }
 
     /// Returns true if `c` at the current position opens an extglob
-    /// pattern: a prefix character (`@`, `?`, `+`, and `!`/`*` when
-    /// `config.extglob` is enabled) followed immediately by `(`.
+    /// pattern: a prefix character (`@ ? + ! *`) followed immediately by
+    /// `(`, when extglob is on (see also `Lexer::next_pattern_token`).
     fn is_extglob_trigger(&self, c: char) -> bool {
         if self.input.get(self.pos + 1) != Some(&'(') {
             return false;
         }
-        matches!(c, '@' | '?' | '+') || (matches!(c, '!' | '*') && self.config.extglob)
+        self.config.extglob && matches!(c, '@' | '?' | '+' | '!' | '*')
     }
 
     /// Returns true if a `[` at the current position should open a
@@ -159,10 +159,12 @@ impl Lexer {
     /// Updates `command_start` / `reserved_words_ok` for the token
     /// that follows the word just emitted.
     ///
-    /// `AssignmentWord` keeps `command_start=true` (assignments chain
-    /// and the eventual command word is still at command position)
-    /// but clears `reserved_words_ok` — no more reserved words in
-    /// this simple command.
+    /// Redirect fd prefixes and targets leave the context untouched.
+    ///
+    /// `AssignmentWord` keeps `command_start` as it was — still true in
+    /// a leading chain (`a=1 b=(x) cmd`), still false for an argument
+    /// (`cmd a=1`) — but clears `reserved_words_ok`: no more reserved
+    /// words in this simple command.
     ///
     /// Other words follow the existing rule: `command_start` re-arms
     /// for keywords that start a new command (`then`, `else`, `elif`,
@@ -171,9 +173,24 @@ impl Lexer {
     /// `reserved_word_acceptable` also recognises reserved words — so
     /// `…; fi done` closes the enclosing loop. `reserved_words_ok`
     /// tracks `command_start` directly.
-    fn advance_word_context(&mut self, kind: TokenType) {
+    fn advance_word_context(&mut self, kind: TokenType, value: &str, fd_prefix: bool) {
+        // Redirect fd prefixes (`2>`, `{fd}>`) and targets are not part of
+        // the command's words, so they leave its context unchanged.
+        if self.ctx.redirect_target {
+            self.ctx.redirect_target = false;
+            return;
+        }
+        if fd_prefix {
+            return;
+        }
+        // The first word of a command decides whether later `name=(…)`
+        // arguments are arrays; leading assignments defer the decision.
+        if self.ctx.command_start && kind != TokenType::AssignmentWord {
+            self.ctx.assignment_builtin = kind == TokenType::Word && is_assignment_builtin(value);
+        }
         if kind == TokenType::AssignmentWord {
-            self.ctx.command_start = true;
+            // Assignments chain at command start (`a=1 b=(x) cmd`) but an
+            // assignment-shaped argument (`cmd a=1`) does not re-arm it.
             self.ctx.reserved_words_ok = false;
         } else {
             self.ctx.command_start = kind.starts_command()
@@ -191,6 +208,9 @@ impl Lexer {
                 );
             self.ctx.reserved_words_ok = self.ctx.command_start;
         }
+        // Assignments and command words count; a keyword that starts a
+        // new command (`then`, `do`, …) does not.
+        self.ctx.command_has_word = kind == TokenType::AssignmentWord || !self.ctx.command_start;
     }
 
     /// Reads a quoted string, escape, dollar expansion, or backtick within a word.
@@ -297,6 +317,9 @@ impl Lexer {
                 '$' => {
                     self.read_dollar(wb)?;
                 }
+                '`' => {
+                    self.read_word_special(wb, c)?;
+                }
                 _ => {
                     self.advance_char();
                     wb.push(c);
@@ -334,8 +357,7 @@ impl Lexer {
         wb.record(span_start, WordSpanKind::ProcessSub(dir));
         // Continue reading word chars after the process substitution
         self.continue_word(&mut wb)?;
-        self.ctx.command_start = false;
-        self.ctx.reserved_words_ok = false;
+        self.advance_word_context(TokenType::Word, &wb.value, false);
         Ok(Token::with_spans(
             TokenType::Word,
             wb.value,
@@ -355,76 +377,6 @@ impl Lexer {
                         self.read_process_sub_into(wb)?;
                     } else {
                         break;
-                    }
-                }
-                '\'' | '"' | '\\' | '$' | '`' => {
-                    self.read_word_special(wb, c)?;
-                }
-                _ => {
-                    self.advance_char();
-                    wb.push(c);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Reads array elements from `(...)`, producing normalized content.
-    ///
-    /// Parses individual elements separated by whitespace directly from
-    /// the input stream, stripping comments. Uses the lexer's existing
-    /// word-reading facilities for quoting and expansion handling.
-    /// The opening `(` must already be consumed and pushed to `wb`.
-    fn read_array_elements(&mut self, wb: &mut WordBuilder) -> Result<()> {
-        let mut need_space = false;
-        loop {
-            // Skip whitespace between elements
-            while matches!(self.peek_char(), Some(' ' | '\t' | '\n' | '\r')) {
-                self.advance_char();
-            }
-            match self.peek_char() {
-                Some(')') => {
-                    self.advance_char();
-                    wb.push(')');
-                    return Ok(());
-                }
-                Some('#') => {
-                    // Comment — skip to end of line
-                    while matches!(self.peek_char(), Some(c) if c != '\n') {
-                        self.advance_char();
-                    }
-                }
-                Some(_) => {
-                    if need_space {
-                        wb.push(' ');
-                    }
-                    self.read_array_element(wb)?;
-                    need_space = true;
-                }
-                None => {
-                    return Err(RableError::matched_pair(
-                        "unterminated array",
-                        self.pos,
-                        self.line,
-                    ));
-                }
-            }
-        }
-    }
-
-    /// Reads a single array element using the same word-reading logic
-    /// as `read_word_token`, but with `)` and whitespace as terminators
-    /// instead of the standard shell metacharacters.
-    fn read_array_element(&mut self, wb: &mut WordBuilder) -> Result<()> {
-        while let Some(c) = self.peek_char() {
-            match c {
-                ' ' | '\t' | '\n' | '\r' | ')' => break,
-                '<' | '>' => {
-                    if self.input.get(self.pos + 1) == Some(&'(') {
-                        self.read_process_sub_into(wb)?;
-                    } else {
-                        self.advance_char();
-                        wb.push(c);
                     }
                 }
                 '\'' | '"' | '\\' | '$' | '`' => {
@@ -460,38 +412,25 @@ fn is_identifier_prefix(value: &str) -> bool {
         .all(|b| matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_'))
 }
 
-/// Returns true if a word value matches the assignment pattern `NAME=`,
-/// `NAME+=`, or `NAME[...]=` / `NAME[...]+=`.
-fn is_assignment_word(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    // Must start with [a-zA-Z_]
-    if !matches!(bytes.first(), Some(b'a'..=b'z' | b'A'..=b'Z' | b'_')) {
-        return false;
-    }
-    let mut i = 1;
-    // Continue with [a-zA-Z_0-9]
-    while i < bytes.len() {
-        match bytes[i] {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' => i += 1,
-            b'[' => {
-                // Skip subscript [...] — reject if it contains whitespace
-                // (bash doesn't allow spaces in assignment subscripts)
-                i += 1;
-                let mut depth = 1;
-                while i < bytes.len() && depth > 0 {
-                    match bytes[i] {
-                        b'[' => depth += 1,
-                        b']' => depth -= 1,
-                        b' ' | b'\t' | b'\n' => return false,
-                        _ => {}
-                    }
-                    i += 1;
-                }
-            }
-            b'+' if i + 1 < bytes.len() && bytes[i + 1] == b'=' => return true,
-            b'=' => return true,
-            _ => return false,
-        }
-    }
-    false
+/// Returns true if the string is a valid file descriptor number: all
+/// digits and within `i32` range, as bash accepts any `int` fd prefix
+/// (`100>file`, `007<in`); larger numbers stay ordinary words.
+pub(crate) fn is_fd_number(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) && s.parse::<i32>().is_ok()
+}
+
+/// Returns true if the string is a variable fd reference like `{varname}`.
+/// Requires valid bash variable name: starts with letter or `_`, then
+/// alphanumeric or `_`.
+pub(crate) fn is_varfd(s: &str) -> bool {
+    s.starts_with('{')
+        && s.ends_with('}')
+        && s.len() >= 3
+        // First char must be letter or underscore (valid variable name start)
+        && s.as_bytes()
+            .get(1)
+            .is_some_and(|&c| c.is_ascii_alphabetic() || c == b'_')
+        && s[1..s.len() - 1]
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
 }

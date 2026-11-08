@@ -6,10 +6,10 @@ use crate::error::{RableError, Result};
 use crate::lexer::heredoc::parse_heredoc_delimiter;
 use crate::token::{Token, TokenType};
 
-use super::Parser;
 use super::helpers::{
     is_fd_number, is_redirect_op_kind, is_varfd, word_node, word_node_from_token,
 };
+use super::{Parser, unexpected_token};
 
 impl Parser {
     pub(super) fn parse_redirect(&mut self) -> Result<Node> {
@@ -64,7 +64,7 @@ impl Parser {
             ));
         }
 
-        let target_tok = self.lexer.next_token()?;
+        let target_tok = self.expect_word()?;
         let is_dup = op_tok.kind == TokenType::GreaterAnd || op_tok.kind == TokenType::LessAnd;
 
         if is_dup && target_tok.value == "-" {
@@ -104,7 +104,7 @@ impl Parser {
 
     fn build_heredoc_redirect(&mut self, op_tok: &Token, fd: i32) -> Result<Node> {
         let start = op_tok.pos;
-        let delim_tok = self.lexer.next_token()?;
+        let delim_tok = self.expect_word()?;
         let strip_tabs = op_tok.kind == TokenType::DoubleLessDash;
         let (delimiter, quoted) = parse_heredoc_delimiter(&delim_tok.value);
         self.lexer
@@ -133,21 +133,23 @@ impl Parser {
             } else {
                 let tok = self.lexer.peek_token()?;
                 if tok.kind == TokenType::Word || tok.kind == TokenType::Number {
+                    // The fd prefix is consumed to look past it; a word after a
+                    // compound command is a syntax error, never droppable text.
                     if is_fd_number(&tok.value) {
                         let tok = self.lexer.next_token()?;
-                        if self.is_redirect_operator()? {
-                            redirects.push(self.parse_redirect_with_fd(&tok)?);
-                            continue;
+                        if !self.is_redirect_operator()? {
+                            return Err(unexpected_token(&tok));
                         }
-                        break;
+                        redirects.push(self.parse_redirect_with_fd(&tok)?);
+                        continue;
                     }
                     if is_varfd(&tok.value) {
                         let varfd_tok = self.lexer.next_token()?;
-                        if self.is_redirect_operator()? {
-                            redirects.push(self.parse_redirect_with_varfd(&varfd_tok)?);
-                            continue;
+                        if !self.is_redirect_operator()? {
+                            return Err(unexpected_token(&varfd_tok));
                         }
-                        break;
+                        redirects.push(self.parse_redirect_with_varfd(&varfd_tok)?);
+                        continue;
                     }
                 }
                 break;
