@@ -487,3 +487,22 @@ fn command_start_subscript_must_close() {
         r#"(command (word "5") (word "3") (redirect "<" "exp["))"#
     );
 }
+
+#[test]
+fn arith_for_needs_exactly_three_expressions() {
+    for source in [
+        "for ((i=0;i<3)); do :; done",
+        "for ((;;;)); do :; done",
+        "for ((i=0; i<5 i++)); do :; done",
+        "for (( )); do :; done",
+    ] {
+        assert!(try_parse(source).is_err(), "{source:?}");
+    }
+    // `;` inside quotes or an expansion does not separate expressions.
+    assert_eq!(
+        sexp("for ((i=0; \"a;b\"; i++)); do :; done"),
+        "(arith-for (init (word \"i=0\")) (test (word \"\\\"a;b\\\"\")) \
+         (step (word \"i++\")) (command (word \":\")))"
+    );
+    assert!(sexp("for ((;;)); do :; done").starts_with("(arith-for (init (word \"1\"))"));
+}
