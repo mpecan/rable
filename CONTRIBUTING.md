@@ -147,6 +147,24 @@ just fuzz-generate 10000      # generate random bash fragments (default: 5,000)
 just fuzz-minimize 'input'    # minimize a failing input
 ```
 
+To measure how far Rable is from bash itself (requires `just build-oracle`):
+
+```bash
+just oracle-corpus            # corpus inputs that differ from bash-oracle (should be 0)
+just oracle-fuzz              # 300k seeded mutations; differences go to oracle-diffs.jsonl
+just oracle-probe cases.txt   # side-by-side for inputs listed one per line
+```
+
+Before and after a refactor, snapshot Rable's own output and compare the two;
+any input whose output changed is reported with bash-oracle's verdict:
+
+```bash
+just oracle-snapshot before.jsonl
+# ... change the code ...
+just oracle-snapshot after.jsonl
+just oracle-compare before.jsonl after.jsonl
+```
+
 If you find a divergence, you can generate oracle tests from it:
 
 ```bash
