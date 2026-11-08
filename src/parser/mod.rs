@@ -297,7 +297,11 @@ mod source_text_tests;
 #[cfg(test)]
 mod span_tests;
 #[cfg(test)]
+mod grammar_rule_tests;
+#[cfg(test)]
 mod syntax_error_tests;
+#[cfg(test)]
+mod syntax_test_support;
 #[cfg(test)]
 mod tests;
 
