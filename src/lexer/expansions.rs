@@ -3,6 +3,11 @@ use crate::error::{RableError, Result};
 use super::Lexer;
 use super::word_builder::{QuotingContext, WordBuilder, WordSpanKind};
 
+/// A parser entry (`parse_paren_body`, `parse_funsub_body`) that runs the
+/// grammar on a fork of the lexer at a given depth and returns where the
+/// fork stopped, as `(pos, line)`.
+type ForkedBodyParser = fn(&Lexer, usize) -> Result<(usize, usize)>;
+
 impl Lexer {
     /// Reads a dollar expansion into the value string.
     pub(super) fn read_dollar(&mut self, wb: &mut WordBuilder) -> Result<()> {
@@ -17,7 +22,7 @@ impl Lexer {
                 if self.peek_char() == Some('(') {
                     self.advance_char();
                     wb.push('(');
-                    self.read_matched_parens(wb, 2, true)?;
+                    self.read_matched_parens(wb, true)?;
                     wb.record(span_start, WordSpanKind::ArithmeticSub);
                 } else {
                     self.read_command_sub(wb)?;
@@ -28,7 +33,7 @@ impl Lexer {
                 self.advance_char();
                 wb.push('{');
                 // `${ cmd; }` / `${| cmd; }`: bash 5.3 command substitution.
-                if let Some(marker @ (' ' | '\t' | '\n' | '|')) = self.peek_char() {
+                if let Some(marker) = self.peek_char().filter(|&c| is_funsub_marker(c)) {
                     if marker == '|' {
                         self.advance_char();
                         wb.push('|');
@@ -81,9 +86,19 @@ impl Lexer {
     /// substitution) and `<(...)`/`>(...)` (process substitution).
     /// Precondition: the opening `(` has just been consumed.
     pub(super) fn read_paren_body_forked(&mut self, wb: &mut WordBuilder) -> Result<()> {
+        self.read_body_forked(wb, crate::parser::parse_paren_body)
+    }
+
+    /// Runs `parse_body` (a parser entry returning its fork's final
+    /// `(pos, line)`) from the current position, then copies the consumed
+    /// source into `wb.value` and moves past it.
+    fn read_body_forked(
+        &mut self,
+        wb: &mut WordBuilder,
+        parse_body: ForkedBodyParser,
+    ) -> Result<()> {
         let body_start = self.pos;
-        let outer_depth = self.parser_depth();
-        let (end_pos, end_line) = crate::parser::parse_paren_body(self, outer_depth)?;
+        let (end_pos, end_line) = parse_body(self, self.parser_depth())?;
         wb.value
             .extend(self.input[body_start..end_pos].iter().copied());
         self.pos = end_pos;
@@ -94,14 +109,7 @@ impl Lexer {
     /// Reads the body of `${ …; }` / `${| …; }` by forking the real
     /// grammar, like `$(…)`, up to and including its closing `}`.
     fn read_funsub_body(&mut self, wb: &mut WordBuilder) -> Result<()> {
-        let body_start = self.pos;
-        let outer_depth = self.parser_depth();
-        let (end_pos, end_line) = crate::parser::parse_funsub_body(self, outer_depth)?;
-        wb.value
-            .extend(self.input[body_start..end_pos].iter().copied());
-        self.pos = end_pos;
-        self.line = end_line;
-        Ok(())
+        self.read_body_forked(wb, crate::parser::parse_funsub_body)
     }
 
     /// Reads a variable name after `$` for simple expansions.
@@ -121,33 +129,23 @@ impl Lexer {
         }
     }
 
-    /// Reads up to the matching closing parenthesis (`close_count` of them
-    /// for `$((`), as bash's `parse_matched_pair` does for `$(( … ))`
-    /// (`arith`) and extglob patterns: only parentheses are counted, and
+    /// Reads up to the matching closing parenthesis (both of `$((`'s when
+    /// `arith`), as bash's `parse_matched_pair` does for `$(( … ))` and
+    /// extglob patterns: only parentheses are counted, and
     /// `#` is an ordinary character, never a comment. Quotes, escapes,
     /// `$…` expansions and backticks are read whole, except that inside
     /// arithmetic `${` opens an expansion only as a `${ …; }` / `${| …; }`
     /// command substitution, as bash's `P_ARITH` scan does (`$((${x))` is
     /// a valid word).
-    pub(super) fn read_matched_parens(
-        &mut self,
-        wb: &mut WordBuilder,
-        close_count: usize,
-        arith: bool,
-    ) -> Result<()> {
+    pub(super) fn read_matched_parens(&mut self, wb: &mut WordBuilder, arith: bool) -> Result<()> {
         wb.enter_context(QuotingContext::CommandSub);
-        let result = self.read_matched_parens_inner(wb, close_count, arith);
+        let result = self.read_matched_parens_inner(wb, arith);
         wb.leave_context();
         result
     }
 
-    fn read_matched_parens_inner(
-        &mut self,
-        wb: &mut WordBuilder,
-        close_count: usize,
-        arith: bool,
-    ) -> Result<()> {
-        let mut depth = close_count;
+    fn read_matched_parens_inner(&mut self, wb: &mut WordBuilder, arith: bool) -> Result<()> {
+        let mut depth = 1 + usize::from(arith);
         while let Some(c) = self.peek_char() {
             match c {
                 '\\' => self.read_paren_escape(wb),
@@ -189,7 +187,10 @@ impl Lexer {
     /// substitution (bash's `FUNSUB_CHAR`).
     fn at_plain_dollar_brace(&self) -> bool {
         self.input.get(self.pos + 1) == Some(&'{')
-            && !matches!(self.input.get(self.pos + 2), Some(' ' | '\t' | '\n' | '|'))
+            && !self
+                .input
+                .get(self.pos + 2)
+                .is_some_and(|&c| is_funsub_marker(c))
     }
 
     /// Reads `\<c>` verbatim; a backslash-newline is a line continuation.
@@ -299,4 +300,10 @@ impl Lexer {
 /// Returns true if the character can follow `$` to start a variable expansion.
 pub(super) const fn is_dollar_start(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '_' | '@' | '*' | '#' | '?' | '-' | '$' | '!')
+}
+
+/// bash's `FUNSUB_CHAR`: after `${`, these open a `${ …; }` / `${| …; }`
+/// command substitution rather than a parameter expansion.
+const fn is_funsub_marker(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n' | '|')
 }

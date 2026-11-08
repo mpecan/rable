@@ -98,19 +98,19 @@ impl Parser {
         // bash's make_arith_for_command: exactly three `;`-separated
         // expressions, each without leading blanks, an empty one being `1`.
         let parts = split_arith_for(&raw);
-        if parts.len() != 3 {
+        let [init, cond, incr] = parts[..] else {
             let message = if parts.len() < 3 {
                 "syntax error: arithmetic expression required"
             } else {
                 "syntax error: `;' unexpected"
             };
             return Err(RableError::parse(message, start, self.lexer.line()));
-        }
+        };
         let expr = |part: &str| match part.trim_start() {
             "" => "1".to_string(),
             text => text.to_string(),
         };
-        let (init, cond, incr) = (expr(parts[0]), expr(parts[1]), expr(parts[2]));
+        let (init, cond, incr) = (expr(init), expr(cond), expr(incr));
 
         self.skip_newlines()?;
         if self.peek_is(TokenType::Semi)? || self.peek_is(TokenType::Newline)? {
@@ -153,10 +153,11 @@ impl Parser {
     }
 }
 
-/// Splits a `for ((…))` header at its top-level `;`s, as bash's
-/// `skip_to_delim` does: quotes, backslash escapes, backticks and
-/// `$(…)`, `${…}`, `$[…]` are skipped over, so `$((1;2))` and `"a;b"`
-/// stay inside one expression.
+/// Splits a `for ((…))` header at its top-level `;`s. A port of bash's
+/// `skip_to_delim (…, ";", SD_NOJMP|SD_NOPROCSUB)` as used by
+/// `make_arith_for_command`, which scans the raw text the same way:
+/// quotes, backslash escapes, backticks and `$(…)`, `${…}`, `$[…]` are
+/// skipped over, so `$((1;2))` and `"a;b"` stay inside one expression.
 fn split_arith_for(raw: &str) -> Vec<&str> {
     let bytes = raw.as_bytes();
     let mut parts = Vec::new();

@@ -99,12 +99,13 @@ impl Parser {
     /// `a || b || c` nests to the right, as bash's `cond_or` recurses:
     /// `(cond-or a (cond-or b c))`.
     fn parse_cond_or(&mut self) -> Result<Node> {
-        let mut operands = vec![self.parse_cond_and()?];
+        let first = self.parse_cond_and()?;
+        let mut rest = Vec::new();
         while !self.is_cond_close()? && self.peek_is(TokenType::Or)? {
             self.lexer.next_token()?;
-            operands.push(self.parse_cond_and()?);
+            rest.push(self.parse_cond_and()?);
         }
-        Ok(nest_right(operands, |left, right| NodeKind::CondOr {
+        Ok(nest_right(first, rest, |left, right| NodeKind::CondOr {
             left,
             right,
         }))
@@ -112,12 +113,13 @@ impl Parser {
 
     /// `a && b && c` nests to the right, as bash's `cond_and` recurses.
     fn parse_cond_and(&mut self) -> Result<Node> {
-        let mut operands = vec![self.parse_cond_primary()?];
+        let first = self.parse_cond_primary()?;
+        let mut rest = Vec::new();
         while !self.is_cond_close()? && self.peek_is(TokenType::And)? {
             self.lexer.next_token()?;
-            operands.push(self.parse_cond_primary()?);
+            rest.push(self.parse_cond_primary()?);
         }
-        Ok(nest_right(operands, |left, right| NodeKind::CondAnd {
+        Ok(nest_right(first, rest, |left, right| NodeKind::CondAnd {
             left,
             right,
         }))
@@ -251,15 +253,18 @@ impl Parser {
     }
 }
 
-/// Folds `a OP b OP c` into `a OP (b OP c)`, iteratively so long chains
-/// cannot exhaust the stack while parsing.
-fn nest_right(mut operands: Vec<Node>, make: fn(Box<Node>, Box<Node>) -> NodeKind) -> Node {
-    let mut right = operands
-        .pop()
-        .unwrap_or_else(|| Node::empty(NodeKind::Empty));
-    while let Some(left) = operands.pop() {
+/// Folds `first OP rest[0] OP rest[1] …` into `first OP (rest[0] OP …)`,
+/// iteratively so long chains cannot exhaust the stack while parsing.
+/// `rest` stays unallocated for the usual single operand.
+fn nest_right(first: Node, rest: Vec<Node>, make: fn(Box<Node>, Box<Node>) -> NodeKind) -> Node {
+    let join = |left: Node, right: Node| {
         let span = Span::new(left.span.start, right.span.end);
-        right = Node::new(make(Box::new(left), Box::new(right)), span);
-    }
-    right
+        Node::new(make(Box::new(left), Box::new(right)), span)
+    };
+    let mut rest = rest.into_iter().rev();
+    let Some(last) = rest.next() else {
+        return first;
+    };
+    let right = rest.fold(last, |right, left| join(left, right));
+    join(first, right)
 }

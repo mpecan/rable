@@ -5,6 +5,7 @@
 use std::fmt;
 
 use crate::ast::{Node, NodeKind};
+use crate::lexer::fd_number;
 
 use super::ansi_c::process_ansi_c_content;
 use super::word::{self, WordSegment};
@@ -43,14 +44,6 @@ pub(super) fn write_redirect(
     } else {
         write!(f, "{target})")
     }
-}
-
-/// The fd a digit-only dup target names, if it fits bash's `int`.
-pub fn fd_number(value: &str) -> Option<i32> {
-    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    value.parse().ok()
 }
 
 pub(super) fn write_heredoc(

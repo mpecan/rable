@@ -55,10 +55,7 @@ pub struct Parser {
 /// terminated by `)`), and `LexerMode::Cmdsub` already provides the
 /// `DELIM)`-rewind heredoc behavior both need.
 pub fn parse_paren_body(outer: &Lexer, outer_depth: usize) -> Result<(usize, usize)> {
-    let mut parser = Parser {
-        lexer: outer.fork(LexerMode::Cmdsub),
-        depth: outer_depth,
-    };
+    let mut parser = Parser::forked(outer, LexerMode::Cmdsub, outer_depth);
     parser.parse_paren_body_inner()?;
     Ok((parser.lexer.pos(), parser.lexer.line()))
 }
@@ -68,10 +65,7 @@ pub fn parse_paren_body(outer: &Lexer, outer_depth: usize) -> Result<(usize, usi
 /// closes the command substitution. Returns the inner lexer's final
 /// `(pos, line)`; the parsed AST is discarded, as for `$(…)`.
 pub fn parse_funsub_body(outer: &Lexer, outer_depth: usize) -> Result<(usize, usize)> {
-    let mut parser = Parser {
-        lexer: outer.fork(LexerMode::Cmdsub),
-        depth: outer_depth,
-    };
+    let mut parser = Parser::forked(outer, LexerMode::Cmdsub, outer_depth);
     parser.lexer.enter_funsub();
     parser.lexer.set_command_start();
     parser.skip_newlines()?;
@@ -87,15 +81,21 @@ pub fn parse_funsub_body(outer: &Lexer, outer_depth: usize) -> Result<(usize, us
 /// and returns the inner lexer's final `(pos, line)`; the parsed AST is
 /// discarded. `outer_depth` is inherited for `MAX_DEPTH`.
 pub fn parse_backtick_body(outer: &Lexer, outer_depth: usize) -> Result<(usize, usize)> {
-    let mut parser = Parser {
-        lexer: outer.fork(LexerMode::Backtick),
-        depth: outer_depth,
-    };
+    let mut parser = Parser::forked(outer, LexerMode::Backtick, outer_depth);
     parser.parse_backtick_body_inner()?;
     Ok((parser.lexer.pos(), parser.lexer.line()))
 }
 
 impl Parser {
+    /// A parser over a `mode` fork of `outer`, inheriting its depth so
+    /// `MAX_DEPTH` stays enforced across nested bodies.
+    fn forked(outer: &Lexer, mode: LexerMode, depth: usize) -> Self {
+        Self {
+            lexer: outer.fork(mode),
+            depth,
+        }
+    }
+
     pub const fn new(lexer: Lexer) -> Self {
         Self { lexer, depth: 0 }
     }

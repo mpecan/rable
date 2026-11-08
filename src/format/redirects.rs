@@ -5,7 +5,7 @@ use crate::ast::{Node, NodeKind};
 
 use super::formatter::Formatter;
 use super::words::process_word_value;
-use crate::sexp::redirects::fd_number;
+use crate::lexer::{default_fd_for_op, fd_number};
 
 impl Formatter {
     /// Emits a redirect after a compound command (`done <<E`), queueing a
@@ -167,13 +167,5 @@ impl Formatter {
             self.write_char(' ');
             self.format_redirect(r);
         }
-    }
-}
-
-const fn default_fd_for_op(op: &str) -> i32 {
-    match op.as_bytes() {
-        b">" | b">>" | b">|" | b">&" => 1,
-        b"<" | b"<&" | b"<>" => 0,
-        _ => -1,
     }
 }

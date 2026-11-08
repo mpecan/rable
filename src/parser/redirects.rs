@@ -3,6 +3,7 @@
 
 use crate::ast::{Node, NodeKind};
 use crate::error::{RableError, Result};
+use crate::lexer::default_fd_for_op;
 use crate::lexer::heredoc::parse_heredoc_delimiter;
 use crate::token::{Token, TokenType};
 
@@ -54,10 +55,10 @@ impl Parser {
         let is_dup = op_tok.kind == TokenType::GreaterAnd || op_tok.kind == TokenType::LessAnd;
         // Dup, move and close redirects always act on a definite fd, which
         // bash prints (`>&2` is `1>&2`): resolve the default here.
-        let fd = match (is_dup, fd) {
-            (true, -1) if op_tok.kind == TokenType::GreaterAnd => 1,
-            (true, -1) => 0,
-            _ => fd,
+        let fd = if is_dup && fd == -1 {
+            default_fd_for_op(&op_tok.value)
+        } else {
+            fd
         };
         // >&- and <&- are complete close-fd operators (no target needed)
         if op_tok.value == ">&-" || op_tok.value == "<&-" {

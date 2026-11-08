@@ -107,7 +107,7 @@ impl Lexer {
         } else if self.config.extglob && wb.value.ends_with(['@', '?', '+', '!', '*']) {
             self.advance_char();
             wb.push('(');
-            self.read_matched_parens(wb, 1, false)?;
+            self.read_matched_parens(wb, false)?;
             Ok(ControlFlow::Continue(()))
         } else {
             Ok(ControlFlow::Break(()))
@@ -271,7 +271,7 @@ impl Lexer {
         wb.push(prefix);
         self.advance_char();
         wb.push('(');
-        self.read_matched_parens(wb, 1, false)?;
+        self.read_matched_parens(wb, false)?;
         wb.record(start, WordSpanKind::Extglob(prefix));
         Ok(())
     }
@@ -429,7 +429,25 @@ fn is_identifier_prefix(value: &str) -> bool {
 /// digits and within `i32` range, as bash accepts any `int` fd prefix
 /// (`100>file`, `007<in`); larger numbers stay ordinary words.
 pub(crate) fn is_fd_number(s: &str) -> bool {
-    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) && s.parse::<i32>().is_ok()
+    fd_number(s).is_some()
+}
+
+/// The fd a digit-only word names, if it fits bash's `int`: `02` is 2.
+pub(crate) fn fd_number(s: &str) -> Option<i32> {
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    s.parse().ok()
+}
+
+/// The fd a redirect operator acts on when none is written: 1 for output
+/// (`>`, `>&`, `>&-`, …), 0 for input; -1 for operators without one.
+pub(crate) const fn default_fd_for_op(op: &str) -> i32 {
+    match op.as_bytes() {
+        b">" | b">>" | b">|" | b">&" | b">&-" => 1,
+        b"<" | b"<&" | b"<>" | b"<&-" => 0,
+        _ => -1,
+    }
 }
 
 /// Returns true if the string is a variable fd reference like `{varname}`.

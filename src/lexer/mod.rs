@@ -34,7 +34,7 @@ mod word_span_tests;
 
 pub(crate) use context::LexerContext;
 pub(crate) use heredoc::PendingHereDoc;
-pub(crate) use words::{is_fd_number, is_varfd};
+pub(crate) use words::{default_fd_for_op, fd_number, is_fd_number, is_varfd};
 
 /// Immutable lexer configuration set at construction time.
 #[derive(Debug, Clone, Copy)]
