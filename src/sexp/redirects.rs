@@ -18,11 +18,17 @@ pub(super) fn write_redirect(
 ) -> fmt::Result {
     write!(f, "(redirect \"{op}\" ")?;
     if let NodeKind::Word { value, spans, .. } = &target.kind {
-        // For fd dup operations (>&, <&), bare digit-only targets are unquoted
         let is_fd_op =
             op.starts_with(">&") || op.starts_with("<&") || op.ends_with("&-") || op.ends_with('&');
-        if is_fd_op && !value.is_empty() && value.chars().all(|c| c.is_ascii_digit()) {
-            write!(f, "{value})")
+        // A move (`3<&0-`) dumps like a plain dup, without the `-`.
+        let value = if is_fd_op {
+            value.strip_suffix('-').unwrap_or(value)
+        } else {
+            value
+        };
+        // Numeric fd targets are unquoted, as the number bash parsed (`02` → 2).
+        if let Some(n) = is_fd_op.then(|| fd_number(value)).flatten() {
+            write!(f, "{n})")
         } else if !spans.is_empty() {
             // Use span-based formatting — redirect targets use literal
             // output (no S-expression escaping of quotes)
@@ -37,6 +43,14 @@ pub(super) fn write_redirect(
     } else {
         write!(f, "{target})")
     }
+}
+
+/// The fd a digit-only dup target names, if it fits bash's `int`.
+pub fn fd_number(value: &str) -> Option<i32> {
+    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
 }
 
 pub(super) fn write_heredoc(

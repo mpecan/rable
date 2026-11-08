@@ -151,9 +151,26 @@ mod tests {
     fn omits_the_file_descriptor_when_it_is_the_operator_default() {
         // Input redirections default to fd 0, output redirections to fd 1.
         assert_eq!(reformat("cat 0< f; echo hi"), "cat < f; echo hi");
-        assert_eq!(reformat("cat 0<&1; echo hi"), "cat <&1; echo hi");
         assert_eq!(reformat("cat 0<> f; echo hi"), "cat <> f; echo hi");
         assert_eq!(reformat("cat 1> f; echo hi"), "cat > f; echo hi");
+    }
+
+    #[test]
+    fn dup_move_and_close_follow_bash_print_redirection() {
+        // A numeric dup or a move always prints its fd; a close is always
+        // `N>&-`; a dup to a word omits the default fd.
+        assert_eq!(reformat("cat 0<&1; echo hi"), "cat 0<&1; echo hi");
+        assert_eq!(reformat("echo error >&2"), "echo error 1>&2");
+        assert_eq!(reformat("read <&0"), "read 0<&0");
+        assert_eq!(reformat("cmd >&02"), "cmd 1>&2");
+        assert_eq!(reformat("exec 3<&0-"), "exec 3<&0-");
+        assert_eq!(reformat("exec 3<&a0-"), "exec 3<&a0-");
+        assert_eq!(reformat("cmd >&-"), "cmd 1>&-");
+        assert_eq!(reformat("cmd <&-"), "cmd 0>&-");
+        assert_eq!(reformat("cmd 3<&-"), "cmd 3>&-");
+        assert_eq!(reformat("cmd >& -"), "cmd 1>&-");
+        assert_eq!(reformat("cmd >&$fd"), "cmd >&$fd");
+        assert_eq!(reformat("cmd 2>&$fd"), "cmd 2>&$fd");
     }
 
     #[test]

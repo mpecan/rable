@@ -51,41 +51,32 @@ impl Parser {
         }
 
         let start = op_tok.pos;
+        let is_dup = op_tok.kind == TokenType::GreaterAnd || op_tok.kind == TokenType::LessAnd;
+        // Dup, move and close redirects always act on a definite fd, which
+        // bash prints (`>&2` is `1>&2`): resolve the default here.
+        let fd = match (is_dup, fd) {
+            (true, -1) if op_tok.kind == TokenType::GreaterAnd => 1,
+            (true, -1) => 0,
+            _ => fd,
+        };
         // >&- and <&- are complete close-fd operators (no target needed)
         if op_tok.value == ">&-" || op_tok.value == "<&-" {
-            return Ok(self.spanned(
-                start,
-                NodeKind::Redirect {
-                    op: ">&-".to_string(),
-                    target: Box::new(word_node("0")),
-                    fd,
-                    varfd,
-                },
-            ));
+            return Ok(self.close_fd_redirect(start, fd, varfd));
         }
 
         let target_tok = self.expect_word()?;
-        let is_dup = op_tok.kind == TokenType::GreaterAnd || op_tok.kind == TokenType::LessAnd;
-
         if is_dup && target_tok.value == "-" {
-            return Ok(self.spanned(
-                start,
-                NodeKind::Redirect {
-                    op: ">&-".to_string(),
-                    target: Box::new(word_node("0")),
-                    fd: -1,
-                    varfd,
-                },
-            ));
+            return Ok(self.close_fd_redirect(start, fd, varfd));
         }
+        // `N<&M-` moves fd M to N. The target keeps its `-`, as written;
+        // the S-expression output drops it, the reformatter prints it.
         if is_dup && target_tok.value.ends_with('-') {
-            let fd_str = &target_tok.value[..target_tok.value.len() - 1];
             return Ok(self.spanned(
                 start,
                 NodeKind::Redirect {
                     op: op_tok.value,
-                    target: Box::new(word_node(fd_str)),
-                    fd: -1,
+                    target: Box::new(word_node(&target_tok.value)),
+                    fd,
                     varfd,
                 },
             ));
@@ -100,6 +91,20 @@ impl Parser {
                 varfd,
             },
         ))
+    }
+
+    /// A close-fd redirect (`N>&-` / `N<&-`). bash-oracle dumps every
+    /// close as `>&-` with a `0` placeholder target; `fd` keeps the fd.
+    fn close_fd_redirect(&self, start: usize, fd: i32, varfd: Option<String>) -> Node {
+        self.spanned(
+            start,
+            NodeKind::Redirect {
+                op: ">&-".to_string(),
+                target: Box::new(word_node("0")),
+                fd,
+                varfd,
+            },
+        )
     }
 
     fn build_heredoc_redirect(&mut self, op_tok: &Token, fd: i32) -> Result<Node> {

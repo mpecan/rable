@@ -5,6 +5,7 @@ use crate::ast::{Node, NodeKind};
 
 use super::formatter::Formatter;
 use super::words::process_word_value;
+use crate::sexp::redirects::fd_number;
 
 impl Formatter {
     /// Emits a redirect after a compound command (`done <<E`), queueing a
@@ -48,33 +49,57 @@ impl Formatter {
         else {
             return;
         };
-        // Close-fd redirects: >&- with target fd → output as "fd>&-"
         if op == ">&-" {
-            if let Some(name) = varfd {
-                self.write_char('{');
-                self.write_str(name);
-                self.write_char('}');
-            } else if let NodeKind::Word { value, .. } = &target.kind {
-                self.write_str(value);
-            }
+            // bash: `N>&-` for every close, whatever its direction.
+            self.write_redirect_fd(varfd.as_deref(), *fd, true);
             self.write_str(">&-");
             return;
         }
+        if op == ">&" || op == "<&" {
+            self.format_dup_redirect(op, target, *fd, varfd.as_deref());
+            return;
+        }
+        let NodeKind::Word { value, spans, .. } = &target.kind else {
+            return;
+        };
+        self.write_redirect_fd(varfd.as_deref(), *fd, *fd != default_fd_for_op(op));
+        self.write_str(op);
+        self.write_char(' ');
+        self.write_str(&process_word_value(value, spans));
+    }
+
+    /// `N>&M`, `N<&M`, and the moves `N>&M-` / `N<&M-`, following bash's
+    /// `print_redirection`: the fd is always printed for a numeric target
+    /// or a move (`>&2` → `1>&2`), and only when not the default for a
+    /// word target (`>&$fd`).
+    fn format_dup_redirect(&mut self, op: &str, target: &Node, fd: i32, varfd: Option<&str>) {
+        let NodeKind::Word { value, spans, .. } = &target.kind else {
+            return;
+        };
+        let moved = value.strip_suffix('-');
+        let target = moved.unwrap_or(value);
+        let number = fd_number(target);
+        let show_fd = moved.is_some() || number.is_some() || fd != default_fd_for_op(op);
+        self.write_redirect_fd(varfd, fd, show_fd);
+        self.write_str(op);
+        match number {
+            Some(n) => self.write_str(&n.to_string()),
+            None if moved.is_some() => self.write_str(target),
+            None => self.write_str(&process_word_value(value, spans)),
+        }
+        if moved.is_some() {
+            self.write_char('-');
+        }
+    }
+
+    /// Writes a redirect's `{name}` or, when `show_fd`, its fd number.
+    fn write_redirect_fd(&mut self, varfd: Option<&str>, fd: i32, show_fd: bool) {
         if let Some(name) = varfd {
             self.write_char('{');
             self.write_str(name);
             self.write_char('}');
-        } else if *fd >= 0 && *fd != default_fd_for_op(op) {
+        } else if show_fd && fd >= 0 {
             self.write_str(&fd.to_string());
-        }
-        self.write_str(op);
-        // Dup redirects (>&, <&) don't need a space before target
-        let is_dup = op == ">&" || op == "<&";
-        if !is_dup {
-            self.write_char(' ');
-        }
-        if let NodeKind::Word { value, spans, .. } = &target.kind {
-            self.write_str(&process_word_value(value, spans));
         }
     }
 
