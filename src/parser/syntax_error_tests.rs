@@ -444,3 +444,17 @@ fn cond_and_or_nest_to_the_right() {
          (cond-unary \"-n\" (cond-term \"b\"))) (cond-unary \"-n\" (cond-term \"c\"))))"
     );
 }
+
+#[test]
+fn and_redirects_take_no_fd_prefix() {
+    // `&>` / `&>>` never take an fd prefix, so the prefix is a word.
+    assert_eq!(
+        sexp("exec {fd}&>1"),
+        r#"(command (word "exec") (word "{fd}") (redirect "&>" "1"))"#
+    );
+    assert_eq!(
+        sexp("a 2&>f"),
+        r#"(command (word "a") (word "2") (redirect "&>" "f"))"#
+    );
+    assert_syntax_error("{ a; } {fd}&>x", 7);
+}

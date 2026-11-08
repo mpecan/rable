@@ -142,7 +142,7 @@ impl Parser {
                     // compound command is a syntax error, never droppable text.
                     if is_fd_number(&tok.value) {
                         let tok = self.lexer.next_token()?;
-                        if !self.is_redirect_operator()? {
+                        if !self.is_redirect_operator()? || self.is_and_redirect()? {
                             return Err(unexpected_token(&tok));
                         }
                         redirects.push(self.parse_redirect_with_fd(&tok)?);
@@ -150,7 +150,7 @@ impl Parser {
                     }
                     if is_varfd(&tok.value) {
                         let varfd_tok = self.lexer.next_token()?;
-                        if !self.is_redirect_operator()? {
+                        if !self.is_redirect_operator()? || self.is_and_redirect()? {
                             return Err(unexpected_token(&varfd_tok));
                         }
                         redirects.push(self.parse_redirect_with_varfd(&varfd_tok)?);

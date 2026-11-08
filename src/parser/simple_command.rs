@@ -126,10 +126,15 @@ impl Parser {
         if !tok.adjacent_to(self.lexer.peek_token()?) {
             return Ok(None);
         }
-        if is_fd_number(&tok.value) && self.is_redirect_operator()? && !self.is_and_redirect()? {
+        // `&>` / `&>>` take no fd prefix: in `exec {fd}&>f` and `2&>f` the
+        // prefix stays an ordinary word.
+        if !self.is_redirect_operator()? || self.is_and_redirect()? {
+            return Ok(None);
+        }
+        if is_fd_number(&tok.value) {
             return Ok(Some(self.parse_redirect_with_fd(tok)?));
         }
-        if is_varfd(&tok.value) && self.is_redirect_operator()? {
+        if is_varfd(&tok.value) {
             return Ok(Some(self.parse_redirect_with_varfd(tok)?));
         }
         Ok(None)
