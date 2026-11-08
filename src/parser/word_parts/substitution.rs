@@ -29,7 +29,7 @@ pub(super) fn cmdsub_to_node(content: &str) -> Node {
 
 /// `${ …; }` / `${| …; }`: a command substitution with `brace: true`.
 pub(super) fn funsub_to_node(pipe: bool, content: &str) -> Node {
-    let open = if pipe { "${|" } else { "${" };
+    let open = crate::sexp::word::funsub_opener(pipe);
     parse_sub(content, &format!("{open}{content}}}"), |cmd| {
         NodeKind::CommandSubstitution {
             command: cmd,

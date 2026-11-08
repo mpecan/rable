@@ -30,14 +30,7 @@ impl Formatter {
         };
         self.write_str("if ");
         self.format_node(condition);
-        self.semicolon();
-        // After heredoc bodies bash starts `then` on its own indented line.
-        if self.take_was_heredoc() {
-            self.write_indent(4);
-            self.write_str("then\n");
-        } else {
-            self.write_str(" then\n");
-        }
+        self.write_body_keyword("then", 4);
         self.with_indent(4, |f| {
             f.indent_here();
             f.format_node(then_body);
@@ -54,6 +47,21 @@ impl Formatter {
         }
         self.indent_here();
         self.write_str("fi");
+    }
+
+    /// Writes `; then` / `; do` after a condition, as bash's if/while
+    /// printers do: after heredoc bodies the keyword starts its own line,
+    /// indented by `indent_after_heredoc` (bash uses 4 for `then` and the
+    /// current indentation for `do`).
+    fn write_body_keyword(&mut self, keyword: &str, indent_after_heredoc: usize) {
+        self.semicolon();
+        if self.take_was_heredoc() {
+            self.write_indent(indent_after_heredoc);
+        } else {
+            self.write_char(' ');
+        }
+        self.write_str(keyword);
+        self.write_char('\n');
     }
 
     /// Ends a compound command's body line: bash's `semicolon()` and a
@@ -82,14 +90,7 @@ impl Formatter {
         self.write_str(keyword);
         self.write_char(' ');
         self.format_node(condition);
-        self.semicolon();
-        // After heredoc bodies bash starts `do` on its own line.
-        if self.take_was_heredoc() {
-            self.indent_here();
-            self.write_str("do\n");
-        } else {
-            self.write_str(" do\n");
-        }
+        self.write_body_keyword("do", self.indent());
         self.with_indent(4, |f| {
             f.indent_here();
             f.format_node(body);
@@ -263,7 +264,7 @@ impl Formatter {
         self.write_char('\n');
         self.indent_here();
         self.write_char('}');
-        self.take_was_heredoc();
+        self.clear_was_heredoc();
     }
 
     pub(super) fn format_subshell(&mut self, node: &Node) {
@@ -276,7 +277,7 @@ impl Formatter {
         self.write_str("( ");
         self.format_node(body);
         self.write_str(" )");
-        self.take_was_heredoc();
+        self.clear_was_heredoc();
         self.write_trailing_redirects(redirects);
     }
 
@@ -291,12 +292,10 @@ impl Formatter {
         self.format_node(body);
         self.semicolon();
         self.write_str(" }");
-        self.take_was_heredoc();
+        self.clear_was_heredoc();
         self.write_trailing_redirects(redirects);
     }
 
-    /// Bash prints `time` before `!` whichever order they were written
-    /// in: `! time a` and `time ! a` both become `time ! a`.
     /// `(( expr ))`: bash prints the expression text as written.
     pub(super) fn format_arith_command(&mut self, node: &Node) {
         let NodeKind::ArithmeticCommand {
@@ -313,6 +312,8 @@ impl Formatter {
         self.write_trailing_redirects(redirects);
     }
 
+    /// Bash prints `time` before `!` whichever order they were written
+    /// in: `! time a` and `time ! a` both become `time ! a`.
     pub(super) fn format_negation(&mut self, node: &Node) {
         let NodeKind::Negation { pipeline } = &node.kind else {
             return;

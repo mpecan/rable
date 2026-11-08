@@ -70,6 +70,11 @@ impl Formatter {
         }
     }
 
+    /// The current indentation, in spaces.
+    pub(super) const fn indent(&self) -> usize {
+        self.indent
+    }
+
     /// Write `self.indent` spaces at the current position.
     pub(super) fn indent_here(&mut self) {
         self.write_indent(self.indent);
@@ -97,15 +102,12 @@ impl Formatter {
     /// Writes a connector's operator ahead of the pending heredoc bodies,
     /// then the bodies and the space bash prints after them, which is
     /// kept even at the end (`$(a <<E &\nx\nE\n )`). Returns whether
-    /// there were bodies.
-    pub(super) fn write_before_heredocs(&mut self, op: &str) -> bool {
+    pub(super) fn write_before_heredocs(&mut self, op: &str) {
         self.out.push_str(op);
-        let flushed = self.flush_heredocs();
-        if flushed {
+        if self.flush_heredocs() {
             self.out.push(' ');
             self.kept_space_end = Some(self.out.len());
         }
-        flushed
     }
 
     /// Writes the pending heredoc bodies: one `\n` ends the command line,
@@ -126,8 +128,17 @@ impl Formatter {
     /// line (heredoc bodies) or a background command (` &`).
     pub(super) fn semicolon(&mut self) {
         self.flush_heredocs();
-        if !(self.out.ends_with('\n') || self.out.ends_with(" &")) {
+        if needs_semicolon(&self.out) {
             self.out.push(';');
+        }
+    }
+
+    /// Writes a `;` or newline separator unless heredoc bodies take its
+    /// place: pending ones are flushed instead, and right after bodies
+    /// (`was_heredoc`) bash drops it (`a <<E && b; c` → `… b c`).
+    pub(super) fn write_separator(&mut self, separator: char) {
+        if !self.flush_heredocs() && !self.take_was_heredoc() {
+            self.out.push(separator);
         }
     }
 
@@ -138,12 +149,24 @@ impl Formatter {
         was
     }
 
+    /// Clears bash's `was_heredoc` flag: the last thing printed was not
+    /// heredoc bodies (a command's redirects, the end of a group, …).
+    pub(super) const fn clear_was_heredoc(&mut self) {
+        self.was_heredoc = false;
+    }
+
     /// Writes a single space that `finish` keeps even at the very end.
     pub(super) fn write_kept_space(&mut self) {
         self.flush_heredocs();
         self.out.push(' ');
         self.kept_space_end = Some(self.out.len());
     }
+}
+
+/// bash's `semicolon()` test: a `;` is needed unless the output already
+/// ends a line (heredoc bodies) or a background command (` &`).
+pub(super) fn needs_semicolon(out: &str) -> bool {
+    !(out.ends_with('\n') || out.ends_with(" &"))
 }
 
 #[cfg(test)]

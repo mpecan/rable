@@ -10,10 +10,7 @@ use crate::ast::NodeKind;
 use crate::format;
 use crate::lexer::word_builder::WordSpan;
 
-use super::{
-    ansi_c::process_ansi_c_content, normalize_cmdsub_content, write_escaped_char,
-    write_escaped_word,
-};
+use super::{ansi_c::process_ansi_c_content, write_escaped_char, write_escaped_word};
 
 /// A typed segment within a word token's raw value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,7 +31,7 @@ pub enum WordSegment {
     /// Process substitution `>(...)` or `<(...)` — direction + content.
     ProcessSubstitution(char, String),
     /// Command substitution `${ …; }`, or `${| …; }` when `pipe` — content
-    /// is the text between `${ ` / `${|` and the closing `}`.
+    /// is the text between [`funsub_opener`] and the closing `}`.
     FunSub { pipe: bool, content: String },
     /// Parameter expansion `${...}` — raw text includes `${` and `}`.
     ParamExpansion(String),
@@ -100,19 +97,12 @@ fn write_one_segment(f: &mut fmt::Formatter<'_>, seg: &WordSegment) -> fmt::Resu
 
 fn write_cmdsub_segment(f: &mut fmt::Formatter<'_>, content: &str) -> fmt::Result {
     write!(f, "$(")?;
-    if let Some(reformatted) = format::reformat_bash(content) {
-        // Add space if content starts with ( to avoid $((
-        if reformatted.starts_with('(') {
-            write!(f, " ")?;
-        }
-        write_escaped_word(f, &reformatted)?;
-    } else {
-        let normalized = normalize_cmdsub_content(content);
-        if normalized.starts_with('(') {
-            write!(f, " ")?;
-        }
-        write_escaped_word(f, &normalized)?;
+    let body = format::reformat_or_normalize(content);
+    // Add space if content starts with ( to avoid $((
+    if body.starts_with('(') {
+        write!(f, " ")?;
     }
+    write_escaped_word(f, &body)?;
     write!(f, ")")
 }
 
@@ -126,11 +116,8 @@ fn write_procsub_segment(
     // Don't reformat content that starts with ( (subshell inside procsub)
     if trimmed.starts_with('(') {
         write_escaped_word(f, trimmed)?;
-    } else if let Some(reformatted) = format::reformat_bash(content) {
-        write_escaped_word(f, &reformatted)?;
     } else {
-        let normalized = normalize_cmdsub_content(content);
-        write_escaped_word(f, &normalized)?;
+        write_escaped_word(f, &format::reformat_or_normalize(content))?;
     }
     write!(f, ")")
 }
@@ -250,15 +237,21 @@ fn span_to_segment(
     }
 }
 
-/// Appends a `${ …; }` / `${| …; }` span: the text between the opening
-/// `${ ` / `${|` and the closing `}`.
+/// The source text that opens a `${ …; }` (`${`, the blank staying in
+/// the body) or a `${| …; }` (`${|`).
+pub const fn funsub_opener(pipe: bool) -> &'static str {
+    if pipe { "${|" } else { "${" }
+}
+
+/// Appends a `${ …; }` / `${| …; }` span: the text between
+/// [`funsub_opener`] and the closing `}`.
 fn push_funsub_span(
     segments: &mut Vec<WordSegment>,
     value: &str,
     span: &crate::lexer::word_builder::WordSpan,
     pipe: bool,
 ) {
-    let open = if pipe { 3 } else { 2 };
+    let open = funsub_opener(pipe).len();
     if let Some(content) = value.get(span.start + open..span.end - 1) {
         segments.push(WordSegment::FunSub {
             pipe,

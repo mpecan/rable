@@ -61,9 +61,7 @@ impl Formatter {
     /// the `;`, and right after bodies (`was_heredoc`) the `;` is dropped,
     /// so `a <<E; b; c` → `a <<E\nx\nE\n b c`. A space always follows.
     fn write_semi_connector(&mut self) {
-        if !self.flush_heredocs() && !self.take_was_heredoc() {
-            self.write_char(';');
-        }
+        self.write_separator(';');
         self.write_char(' ');
     }
 
@@ -72,7 +70,7 @@ impl Formatter {
     /// `a <<E\nx\nE\n\nb`).
     fn write_newline_connector(&mut self) {
         self.flush_heredocs();
-        self.take_was_heredoc();
+        self.clear_was_heredoc();
         self.write_char('\n');
     }
 
@@ -123,14 +121,10 @@ impl Formatter {
         }
     }
 
-    /// A `;` or newline between two commands of a function body. As in
-    /// bash, heredoc bodies take the separator's place (and the next
-    /// separator is dropped after them, see `was_heredoc`); a line break
-    /// follows.
+    /// A `;` or newline between two commands of a function body (see
+    /// [`Self::write_separator`]), then a line break.
     fn write_block_separator(&mut self, separator: char) {
-        if !self.flush_heredocs() && !self.take_was_heredoc() {
-            self.write_char(separator);
-        }
+        self.write_separator(separator);
         self.write_char('\n');
         self.indent_here();
     }

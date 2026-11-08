@@ -8,7 +8,7 @@ use crate::ast::{Node, NodeKind};
 
 use super::ansi_c::process_ansi_c_content;
 use super::word::{self, WordSegment};
-use super::{normalize_cmdsub_content, write_escaped_word};
+use super::write_escaped_word;
 
 pub(super) fn write_redirect(
     f: &mut fmt::Formatter<'_>,
@@ -85,12 +85,7 @@ pub(super) fn write_redirect_segments(
             }
             WordSegment::CommandSubstitution(content) => {
                 write!(f, "$(")?;
-                if let Some(reformatted) = crate::format::reformat_bash(content) {
-                    write!(f, "{reformatted}")?;
-                } else {
-                    let normalized = normalize_cmdsub_content(content);
-                    write!(f, "{normalized}")?;
-                }
+                write!(f, "{}", crate::format::reformat_or_normalize(content))?;
                 write!(f, ")")?;
             }
             WordSegment::FunSub { pipe, content } => {
@@ -98,12 +93,7 @@ pub(super) fn write_redirect_segments(
             }
             WordSegment::ProcessSubstitution(dir, content) => {
                 write!(f, "{dir}(")?;
-                if let Some(reformatted) = crate::format::reformat_bash(content) {
-                    write!(f, "{reformatted}")?;
-                } else {
-                    let normalized = normalize_cmdsub_content(content);
-                    write!(f, "{normalized}")?;
-                }
+                write!(f, "{}", crate::format::reformat_or_normalize(content))?;
                 write!(f, ")")?;
             }
             WordSegment::ParamExpansion(text)

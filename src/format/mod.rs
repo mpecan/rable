@@ -53,22 +53,19 @@ impl Drop for DepthGuard {
     }
 }
 
-/// Attempts to reformat bash source into canonical form.
-/// Returns `None` if parsing fails (in which case raw text is used).
-///
-/// The re-parse runs in `LexerMode::Cmdsub` because `reformat_bash` is
-/// only ever called on content extracted from a `$(…)` / `<(…)` / `>(…)`
-/// span, and that mode enables the same sloppy heredoc-terminator
-/// recognition the original fork used (see #39 and
-/// `Lexer::try_match_sloppy_delimiter`).
+/// The canonical text of a command substitution body: reformatted when
+/// it parses, otherwise trimmed (see [`crate::sexp::normalize_cmdsub_content`]).
+pub fn reformat_or_normalize(content: &str) -> String {
+    reformat_bash(content).unwrap_or_else(|| crate::sexp::normalize_cmdsub_content(content))
+}
+
 /// bash's form of `${ …; }` / `${| …; }` (`content` is the text after
-/// `${ ` / `${|`, before `}`): the reformatted body, a `;` unless the body
+/// `${` / `${|`, before `}`): the reformatted body, a `;` unless the body
 /// ends a line or with ` &` (bash's `semicolon()`), then ` }`. So
 /// `${ echo hi;}` → `${ echo hi; }` and `${| echo hi; }` → `${|echo hi; }`.
 pub fn funsub_text(pipe: bool, content: &str) -> String {
     let open = if pipe { "${|" } else { "${ " };
-    let mut body =
-        reformat_bash(content).unwrap_or_else(|| crate::sexp::normalize_cmdsub_content(content));
+    let mut body = reformat_or_normalize(content);
     if body.is_empty() {
         // bash prints an empty body as `${ }`, with or without the `|`.
         return "${ }".to_string();
@@ -78,13 +75,21 @@ pub fn funsub_text(pipe: bool, content: &str) -> String {
         body.push('\n');
     }
     let mut text = format!("{open}{body}");
-    if !(body.ends_with('\n') || body.ends_with(" &")) {
+    if formatter::needs_semicolon(&body) {
         text.push(';');
     }
     text.push_str(" }");
     text
 }
 
+/// Attempts to reformat bash source into canonical form.
+/// Returns `None` if parsing fails (in which case raw text is used).
+///
+/// The re-parse runs in `LexerMode::Cmdsub` because `reformat_bash` is
+/// only ever called on content extracted from a `$(…)` / `<(…)` / `>(…)`
+/// span, and that mode enables the same sloppy heredoc-terminator
+/// recognition the original fork used (see #39 and
+/// `Lexer::try_match_sloppy_delimiter`).
 pub fn reformat_bash(source: &str) -> Option<String> {
     if source.is_empty() || source.len() > 1000 {
         return None;

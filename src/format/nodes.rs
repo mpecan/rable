@@ -63,7 +63,7 @@ impl Formatter {
         };
         self.format_command_words(assignments, words);
         if !redirects.is_empty() {
-            self.take_was_heredoc();
+            self.clear_was_heredoc();
         }
         // Phase 1: all redirect heads inline on the command line.
         // For heredocs this is just the `<<DELIM` part — the bodies are
