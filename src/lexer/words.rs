@@ -20,6 +20,17 @@ impl Lexer {
             match c {
                 // Metacharacters end a word.
                 ' ' | '\t' | '\n' | '|' | '&' | ';' | ')' => break,
+                // bash: the `}` closing `${ …; }` is a token of its own even
+                // when more word characters follow it (`${ a;}${ b;}`).
+                '}' if wb.is_empty()
+                    && self.ctx.funsub
+                    && self.ctx.command_start
+                    && self.ctx.reserved_words_ok =>
+                {
+                    self.advance_char();
+                    wb.push('}');
+                    break;
+                }
                 // Closing delimiter of a backtick fork ends the word.
                 // The byte is consumed later by `exit_backtick_fork`.
                 '`' if self.at_backtick_terminator() => break,

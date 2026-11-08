@@ -46,3 +46,8 @@ pub(super) fn assert_words(source: &str, words: &[&str]) {
         "{source:?}: got {got}"
     );
 }
+
+/// Asserts `source` is rejected with any error.
+pub(super) fn assert_rejected(source: &str) {
+    assert!(try_parse(source).is_err(), "{source:?} should be rejected");
+}

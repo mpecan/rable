@@ -61,6 +61,30 @@ impl Drop for DepthGuard {
 /// span, and that mode enables the same sloppy heredoc-terminator
 /// recognition the original fork used (see #39 and
 /// `Lexer::try_match_sloppy_delimiter`).
+/// bash's form of `${ …; }` / `${| …; }` (`content` is the text after
+/// `${ ` / `${|`, before `}`): the reformatted body, a `;` unless the body
+/// ends a line or with ` &` (bash's `semicolon()`), then ` }`. So
+/// `${ echo hi;}` → `${ echo hi; }` and `${| echo hi; }` → `${|echo hi; }`.
+pub fn funsub_text(pipe: bool, content: &str) -> String {
+    let open = if pipe { "${|" } else { "${ " };
+    let mut body =
+        reformat_bash(content).unwrap_or_else(|| crate::sexp::normalize_cmdsub_content(content));
+    if body.is_empty() {
+        // bash prints an empty body as `${ }`, with or without the `|`.
+        return "${ }".to_string();
+    }
+    // A body ended by a newline keeps it, as bash's newline connector does.
+    if content.trim_end_matches([' ', '\t']).ends_with('\n') && !body.ends_with('\n') {
+        body.push('\n');
+    }
+    let mut text = format!("{open}{body}");
+    if !(body.ends_with('\n') || body.ends_with(" &")) {
+        text.push(';');
+    }
+    text.push_str(" }");
+    text
+}
+
 pub fn reformat_bash(source: &str) -> Option<String> {
     if source.is_empty() || source.len() > 1000 {
         return None;

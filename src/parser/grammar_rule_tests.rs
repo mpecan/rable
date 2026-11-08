@@ -213,3 +213,17 @@ fn arith_for_needs_exactly_three_expressions() {
     );
     assert!(sexp("for ((;;)); do :; done").starts_with("(arith-for (init (word \"1\"))"));
 }
+
+#[test]
+fn funsub_is_parsed_as_commands() {
+    // `${ …; }` / `${| …; }` hold commands up to a `}` reserved word.
+    assert_rejected("echo ${ foo^}");
+    assert_rejected("echo ${ echo hi }");
+    // bash reprints the body like `$(…)`.
+    assert_words("echo ${ echo hi;}", &["echo", "${ echo hi; }"]);
+    assert_words("echo ${| echo hi; }", &["echo", "${|echo hi; }"]);
+    assert_words("echo ${ a;}${ b;}", &["echo", "${ a; }${ b; }"]);
+    assert_words("echo ${ }", &["echo", "${ }"]);
+    // A plain `${…}` is still a parameter expansion.
+    assert_words("echo ${foo}", &["echo", "${foo}"]);
+}

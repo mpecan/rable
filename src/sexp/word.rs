@@ -33,6 +33,9 @@ pub enum WordSegment {
     CommandSubstitution(String),
     /// Process substitution `>(...)` or `<(...)` — direction + content.
     ProcessSubstitution(char, String),
+    /// Command substitution `${ …; }`, or `${| …; }` when `pipe` — content
+    /// is the text between `${ ` / `${|` and the closing `}`.
+    FunSub { pipe: bool, content: String },
     /// Parameter expansion `${...}` — raw text includes `${` and `}`.
     ParamExpansion(String),
     /// Simple variable `$var` — raw text includes `$` prefix.
@@ -86,6 +89,9 @@ fn write_one_segment(f: &mut fmt::Formatter<'_>, seg: &WordSegment) -> fmt::Resu
             write!(f, "))")
         }
         WordSegment::CommandSubstitution(content) => write_cmdsub_segment(f, content),
+        WordSegment::FunSub { pipe, content } => {
+            write_escaped_word(f, &format::funsub_text(*pipe, content))
+        }
         WordSegment::ProcessSubstitution(direction, content) => {
             write_procsub_segment(f, *direction, content)
         }
@@ -189,6 +195,7 @@ fn span_to_segment(
                 segments.push(WordSegment::CommandSubstitution(c.to_string()));
             }
         }
+        WordSpanKind::FunSub(pipe) => push_funsub_span(segments, value, span, *pipe),
         WordSpanKind::ProcessSub(dir) => {
             if let Some(c) = value.get(span.start + 2..span.end - 1) {
                 segments.push(WordSegment::ProcessSubstitution(*dir, c.to_string()));
@@ -240,6 +247,23 @@ fn span_to_segment(
             }
         }
         _ => {} // filtered out by span filter
+    }
+}
+
+/// Appends a `${ …; }` / `${| …; }` span: the text between the opening
+/// `${ ` / `${|` and the closing `}`.
+fn push_funsub_span(
+    segments: &mut Vec<WordSegment>,
+    value: &str,
+    span: &crate::lexer::word_builder::WordSpan,
+    pipe: bool,
+) {
+    let open = if pipe { 3 } else { 2 };
+    if let Some(content) = value.get(span.start + open..span.end - 1) {
+        segments.push(WordSegment::FunSub {
+            pipe,
+            content: content.to_string(),
+        });
     }
 }
 
@@ -295,6 +319,7 @@ const fn is_sexp_relevant(kind: &crate::lexer::word_builder::WordSpanKind) -> bo
             | WordSpanKind::AnsiCQuote
             | WordSpanKind::LocaleString
             | WordSpanKind::ProcessSub(_)
+            | WordSpanKind::FunSub(_)
     )
 }
 

@@ -44,6 +44,9 @@ pub(super) fn process_word_value(value: &str, spans: &[WordSpan]) -> String {
                 }
                 result.push(')');
             }
+            WordSegment::FunSub { pipe, content } => {
+                result.push_str(&super::funsub_text(*pipe, content));
+            }
             WordSegment::ProcessSubstitution(direction, content) => {
                 result.push(*direction);
                 result.push('(');

@@ -93,6 +93,9 @@ pub(super) fn write_redirect_segments(
                 }
                 write!(f, ")")?;
             }
+            WordSegment::FunSub { pipe, content } => {
+                write!(f, "{}", crate::format::funsub_text(*pipe, content))?;
+            }
             WordSegment::ProcessSubstitution(dir, content) => {
                 write!(f, "{dir}(")?;
                 if let Some(reformatted) = crate::format::reformat_bash(content) {

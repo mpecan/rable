@@ -115,6 +115,11 @@ impl Lexer {
         self.ctx.reserved_words_ok = true;
     }
 
+    /// Marks this (forked) lexer as reading a `${ …; }` body.
+    pub(crate) const fn enter_funsub(&mut self) {
+        self.ctx.funsub = true;
+    }
+
     /// Signal that the next word position is a command start. Also
     /// re-arms reserved-word recognition — a fresh command is always
     /// allowed to begin with a reserved word — and forgets the previous

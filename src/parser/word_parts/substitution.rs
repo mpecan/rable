@@ -27,6 +27,17 @@ pub(super) fn cmdsub_to_node(content: &str) -> Node {
     })
 }
 
+/// `${ …; }` / `${| …; }`: a command substitution with `brace: true`.
+pub(super) fn funsub_to_node(pipe: bool, content: &str) -> Node {
+    let open = if pipe { "${|" } else { "${" };
+    parse_sub(content, &format!("{open}{content}}}"), |cmd| {
+        NodeKind::CommandSubstitution {
+            command: cmd,
+            brace: true,
+        }
+    })
+}
+
 pub(super) fn procsub_to_node(direction: char, content: &str) -> Node {
     parse_sub(content, &format!("{direction}({content})"), |cmd| {
         NodeKind::ProcessSubstitution {

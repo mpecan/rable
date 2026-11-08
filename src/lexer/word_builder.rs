@@ -117,6 +117,8 @@ pub(crate) enum WordSpanKind {
     LocaleString,
     /// Process substitution: `<(...)` or `>(...)`.
     ProcessSub(char),
+    /// Command substitution `${ …; }`, or `${| …; }` when `true`.
+    FunSub(bool),
 
     // -- Structural (formatter treats as literal text) --
     /// Single-quoted string: `'...'`.

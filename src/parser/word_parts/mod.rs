@@ -88,6 +88,7 @@ fn segment_to_node(seg: WordSegment) -> Node {
         }
         WordSegment::ArithmeticSub(inner) => substitution::arithmetic_sub_to_node(&inner),
         WordSegment::CommandSubstitution(content) => substitution::cmdsub_to_node(&content),
+        WordSegment::FunSub { pipe, content } => substitution::funsub_to_node(pipe, &content),
         WordSegment::ProcessSubstitution(direction, content) => {
             substitution::procsub_to_node(direction, &content)
         }

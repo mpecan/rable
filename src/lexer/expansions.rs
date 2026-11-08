@@ -27,8 +27,18 @@ impl Lexer {
             Some('{') => {
                 self.advance_char();
                 wb.push('{');
-                self.read_param_expansion_braces(wb)?;
-                wb.record(span_start, WordSpanKind::ParamExpansion);
+                // `${ cmd; }` / `${| cmd; }`: bash 5.3 command substitution.
+                if let Some(marker @ (' ' | '\t' | '\n' | '|')) = self.peek_char() {
+                    if marker == '|' {
+                        self.advance_char();
+                        wb.push('|');
+                    }
+                    self.read_funsub_body(wb)?;
+                    wb.record(span_start, WordSpanKind::FunSub(marker == '|'));
+                } else {
+                    self.read_param_expansion_braces(wb)?;
+                    wb.record(span_start, WordSpanKind::ParamExpansion);
+                }
             }
             Some('\'') => {
                 self.advance_char();
@@ -74,6 +84,19 @@ impl Lexer {
         let body_start = self.pos;
         let outer_depth = self.parser_depth();
         let (end_pos, end_line) = crate::parser::parse_paren_body(self, outer_depth)?;
+        wb.value
+            .extend(self.input[body_start..end_pos].iter().copied());
+        self.pos = end_pos;
+        self.line = end_line;
+        Ok(())
+    }
+
+    /// Reads the body of `${ …; }` / `${| …; }` by forking the real
+    /// grammar, like `$(…)`, up to and including its closing `}`.
+    fn read_funsub_body(&mut self, wb: &mut WordBuilder) -> Result<()> {
+        let body_start = self.pos;
+        let outer_depth = self.parser_depth();
+        let (end_pos, end_line) = crate::parser::parse_funsub_body(self, outer_depth)?;
         wb.value
             .extend(self.input[body_start..end_pos].iter().copied());
         self.pos = end_pos;

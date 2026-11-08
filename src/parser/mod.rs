@@ -63,6 +63,25 @@ pub fn parse_paren_body(outer: &Lexer, outer_depth: usize) -> Result<(usize, usi
     Ok((parser.lexer.pos(), parser.lexer.line()))
 }
 
+/// Runs the real command-list grammar on a fork of `outer` positioned
+/// after `${ ` or `${|`, up to and including the `}` reserved word that
+/// closes the command substitution. Returns the inner lexer's final
+/// `(pos, line)`; the parsed AST is discarded, as for `$(…)`.
+pub fn parse_funsub_body(outer: &Lexer, outer_depth: usize) -> Result<(usize, usize)> {
+    let mut parser = Parser {
+        lexer: outer.fork(LexerMode::Cmdsub),
+        depth: outer_depth,
+    };
+    parser.lexer.enter_funsub();
+    parser.lexer.set_command_start();
+    parser.skip_newlines()?;
+    if !parser.peek_is(TokenType::RightBrace)? {
+        let _ = parser.parse_list()?;
+    }
+    parser.expect_closing(TokenType::RightBrace, "}")?;
+    Ok((parser.lexer.pos(), parser.lexer.line()))
+}
+
 /// Runs the real command-list grammar on a backtick fork of `outer`
 /// until an unescaped `` ` `` is reached. Consumes the closing `` ` ``
 /// and returns the inner lexer's final `(pos, line)`; the parsed AST is
@@ -291,13 +310,13 @@ mod depth_and_errors_tests;
 #[cfg(test)]
 mod fd_prefix_tests;
 #[cfg(test)]
+mod grammar_rule_tests;
+#[cfg(test)]
 mod reserved_after_compound_tests;
 #[cfg(test)]
 mod source_text_tests;
 #[cfg(test)]
 mod span_tests;
-#[cfg(test)]
-mod grammar_rule_tests;
 #[cfg(test)]
 mod syntax_error_tests;
 #[cfg(test)]
