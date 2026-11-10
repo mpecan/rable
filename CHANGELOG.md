@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.3.0](https://github.com/mpecan/rable/compare/rable-v0.2.2...rable-v0.3.0) (2026-11-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **parser:** parse() now raises ParseError for `]]` where a command would start (` ]] foo`, `a; ]] b`), an unclosed `name[` subscript at the start of a command (`foo[0`), a `for ((…))` header without exactly three expressions (`for ((i=0;i<3))`, `for ((;;;))`), and a `${ …; }` command substitution whose body does not end in a `}` reserved word (`${ foo^}`).
+* **format:** the text inside `$(…)`, `<(…)`, `>(…)` and `${ …; }` words now follows bash where it differed: dup, move and close redirects show their fd (`>&2` → `1>&2`, `<&-` → `0>&-`), a coproc with a compound body is named (`coproc COPROC { cat; }`), separators after heredocs follow bash (`a <<E && b; c` → `… b c`), newline separators stay newlines, function bodies put each command on its own line, and bodies are reformatted at any length and nesting depth.
+* **parser:** `[[ a && b && c ]]` now parses as `(cond-and a (cond-and b c))`, as in bash, and a numeric dup target dumps as the number bash parsed (`>&02` → `2`).
+* NodeKind::Redirect has a new `kind: RedirectKind` field (File, Dup, Move, Close); a close redirect's `op` is `>&` or `<&` (was `>&-`) and its target is `-` (was `0`), and a move's target no longer ends in `-`. ListOperator has a new `Newline` variant, nested command substitutions in word parts are decomposed at every level, and NodeKind::CommandSubstitution has a new `reply` field (true for `${| …; }`, dumped as `cmdsub-reply`).
+* **parser:** parse() now raises ParseError for input bash rejects that was accepted before: an operator or end of input as a redirect target (`f>`, `cmd >;`), junk or empty case patterns (`case $x in a||q)`), operators in a `for … in` list, a word after a compound command (`(a)1`, previously dropped silently), a function body that is not a compound command (`f() echo`, `f()`), a `function` name that is not a word, and a bare `!` or `time` before `&&`, `||`, `|`, `)` or `}` (`x && ! && y`).
+* **lexer:** `name=(…)` is an array only with a valid name in assignment position or as an argument of alias, declare, eval, export, let, local, readonly or typeset; elsewhere `(` is an operator, so `echo a=(1 2)`, `arr=+()` and `a=(x) 2>f b=(y)` are syntax errors, as are unquoted `; & | ( < >` inside the list (`a=(x;y)`).
+* **lexer:** `@(…)`, `?(…)` and `+(…)` are extended patterns only when parsing with extglob enabled, like `!(…)` and `*(…)` already were, except for the pattern operand of `==`, `=` and `!=` in `[[ ]]`, which bash always allows. Callers that parse extglob patterns with the default extglob=False must now pass extglob=True.
+* **format:** the text of `$(…)`, `<(…)` and `>(…)` words in the S-expression output now follows bash: after a heredoc, `&&`, `||`, `&` and `|` come before its body and a trailing `&` keeps bash's space before `)`; a bare `!` or `time` keeps its space (`$(! )`); `time` is printed before `!`; and word-only content is normalised too (`$(a  b)` → `$(a b)`, `$(time -- a)` → `$(time -p a)`).
+* **parser:** some valid input now parses to bash's tree: `time -p ! a` is a negation (the `!` was read as a word), `time -- a` is `(time -p …)`, and `function f (( x ))` has an arithmetic body instead of nested subshells.
+* bash-oracle, not Parable, now decides the expected output; where they disagree rable follows bash, so the Parable corpus case `backgrounded heredoc in cmdsub` now expects bash's `$(cat <<EOF &\nbody\nEOF\n )`.
+
+### Features
+
+* **parser:** parse ${ …; } and ${| …; } command substitutions like bash 5.3 ([a0d7192](https://github.com/mpecan/rable/commit/a0d71920c28b15744d4e84a5ff6e51d8eba67519))
+
+
+### Bug Fixes
+
+* accept array subscripts, `+`/`@` function names and `time -p { …; }` ([729777e](https://github.com/mpecan/rable/commit/729777e8c39189366b5c390c866ac47aba9bcdb0))
+* **format:** print command substitutions the way bash does ([a0d7192](https://github.com/mpecan/rable/commit/a0d71920c28b15744d4e84a5ff6e51d8eba67519))
+* **format:** print command substitutions the way bash does ([729777e](https://github.com/mpecan/rable/commit/729777e8c39189366b5c390c866ac47aba9bcdb0))
+* **lexer:** only read name=(…) as an array where bash does ([729777e](https://github.com/mpecan/rable/commit/729777e8c39189366b5c390c866ac47aba9bcdb0))
+* **lexer:** recognise extended patterns only with extglob ([729777e](https://github.com/mpecan/rable/commit/729777e8c39189366b5c390c866ac47aba9bcdb0))
+* **lexer:** scan $((…)) the way bash does, keep {fd} before &&gt;, join array elements with one space, and stop leaking S-expressions into $(…) ([a0d7192](https://github.com/mpecan/rable/commit/a0d71920c28b15744d4e84a5ff6e51d8eba67519))
+* **parser:** nest [[ && / || ]] to the right like bash ([a0d7192](https://github.com/mpecan/rable/commit/a0d71920c28b15744d4e84a5ff6e51d8eba67519))
+* **parser:** parse time options and arithmetic function bodies like bash ([729777e](https://github.com/mpecan/rable/commit/729777e8c39189366b5c390c866ac47aba9bcdb0))
+* **parser:** reject more syntax that bash rejects ([a0d7192](https://github.com/mpecan/rable/commit/a0d71920c28b15744d4e84a5ff6e51d8eba67519))
+* **parser:** reject syntax that bash rejects instead of accepting it ([729777e](https://github.com/mpecan/rable/commit/729777e8c39189366b5c390c866ac47aba9bcdb0))
+
+
+### Documentation
+
+* make bash-oracle the reference over Parable ([729777e](https://github.com/mpecan/rable/commit/729777e8c39189366b5c390c866ac47aba9bcdb0))
+
+
+### Code Refactoring
+
+* record what a redirect does and print substitutions from the parsed tree ([a0d7192](https://github.com/mpecan/rable/commit/a0d71920c28b15744d4e84a5ff6e51d8eba67519))
+
 ## [0.2.2](https://github.com/mpecan/rable/compare/rable-v0.2.1...rable-v0.2.2) (2026-10-19)
 
 
