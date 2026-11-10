@@ -278,3 +278,18 @@ fn nested_substitution_debug_and_eq_stay_linear() {
     assert!(format!("{nodes:?}").len() < 100_000);
     assert_eq!(nodes, try_parse(&source).unwrap_or_default());
 }
+
+#[test]
+fn arith_for_split_skips_substitutions_like_bash() {
+    // A `;` inside a quoted `$(…)`, or a `case` terminator inside one, is
+    // not an expression separator.
+    assert_eq!(
+        sexp(r#"for ((i=0; "$(printf ";")"; i++)); do :; done"#),
+        r#"(arith-for (init (word "i=0")) (test (word "\"$(printf \";\")\"")) (step (word "i++")) (command (word ":")))"#
+    );
+    let nested = sexp("for ((i=$(case x in x) echo 0;; esac); i<3; i++)); do :; done");
+    assert!(
+        nested.contains(r#"(test (word "i<3")) (step (word "i++"))"#),
+        "{nested}"
+    );
+}

@@ -3,6 +3,7 @@
 
 use crate::ast::{Node, NodeKind};
 use crate::error::{RableError, Result};
+use crate::lexer::split_top_level;
 use crate::token::TokenType;
 
 use super::Parser;
@@ -97,8 +98,8 @@ impl Parser {
         let raw = self.lexer.read_until_double_paren()?;
         // bash's make_arith_for_command: exactly three `;`-separated
         // expressions, each without leading blanks, an empty one being `1`.
-        let parts = split_arith_for(&raw);
-        let [init, cond, incr] = parts[..] else {
+        let parts = split_top_level(&raw, ';')?;
+        let [init, cond, incr] = &parts[..] else {
             let message = if parts.len() < 3 {
                 "syntax error: arithmetic expression required"
             } else {
@@ -151,57 +152,4 @@ impl Parser {
             Ok((body, redirects))
         }
     }
-}
-
-/// Splits a `for ((…))` header at its top-level `;`s. A port of bash's
-/// `skip_to_delim (…, ";", SD_NOJMP|SD_NOPROCSUB)` as used by
-/// `make_arith_for_command`, which scans the raw text the same way:
-/// quotes, backslash escapes, backticks and `$(…)`, `${…}`, `$[…]` are
-/// skipped over, so `$((1;2))` and `"a;b"` stay inside one expression.
-fn split_arith_for(raw: &str) -> Vec<&str> {
-    let bytes = raw.as_bytes();
-    let mut parts = Vec::new();
-    let (mut start, mut i) = (0, 0);
-    let mut closers: Vec<u8> = Vec::new();
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\\' => i += 1,
-            quote @ (b'\'' | b'"' | b'`') => {
-                i = skip_quoted(bytes, i, quote);
-            }
-            b'$' if matches!(bytes.get(i + 1), Some(b'(' | b'{' | b'[')) => {
-                closers.push(match bytes[i + 1] {
-                    b'(' => b')',
-                    b'{' => b'}',
-                    _ => b']',
-                });
-                i += 1;
-            }
-            b'(' if !closers.is_empty() => closers.push(b')'),
-            c if closers.last() == Some(&c) => {
-                closers.pop();
-            }
-            b';' if closers.is_empty() => {
-                parts.push(&raw[start..i]);
-                start = i + 1;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    parts.push(&raw[start..]);
-    parts
-}
-
-/// Index of the quote closing the one at `open` (or the end), honouring
-/// backslash escapes except inside single quotes.
-fn skip_quoted(bytes: &[u8], open: usize, quote: u8) -> usize {
-    let mut i = open + 1;
-    while i < bytes.len() && bytes[i] != quote {
-        if bytes[i] == b'\\' && quote != b'\'' {
-            i += 1;
-        }
-        i += 1;
-    }
-    i
 }

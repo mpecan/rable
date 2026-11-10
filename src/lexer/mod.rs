@@ -10,6 +10,7 @@ mod backtick;
 mod brace_expansion;
 mod cond_regex;
 mod context;
+mod delimited;
 mod expansions;
 pub(crate) mod heredoc;
 mod operators;
@@ -33,6 +34,7 @@ mod tests;
 mod word_span_tests;
 
 pub(crate) use context::LexerContext;
+pub(crate) use delimited::split_top_level;
 pub(crate) use heredoc::PendingHereDoc;
 pub(crate) use words::{default_fd_for_op, fd_number, is_fd_number, is_varfd};
 
