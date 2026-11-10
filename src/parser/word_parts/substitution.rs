@@ -25,11 +25,13 @@ pub(super) fn cmdsub_to_node(sub: &Substitution) -> Node {
         NodeKind::CommandSubstitution {
             command: cmd,
             brace: false,
+            reply: false,
         }
     })
 }
 
-/// `${ …; }` / `${| …; }`: a command substitution with `brace: true`.
+/// `${ …; }` / `${| …; }`: a command substitution with `brace: true`,
+/// and `reply` for `${| …; }`.
 pub(super) fn funsub_to_node(pipe: bool, sub: &Substitution) -> Node {
     let open = crate::sexp::word::funsub_opener(pipe);
     let content = &sub.content;
@@ -37,6 +39,7 @@ pub(super) fn funsub_to_node(pipe: bool, sub: &Substitution) -> Node {
         NodeKind::CommandSubstitution {
             command: cmd,
             brace: true,
+            reply: pipe,
         }
     })
 }

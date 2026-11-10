@@ -480,3 +480,23 @@ fn expansions_inside_double_quotes_still_decompose() {
         NodeKind::WordLiteral { value } if value == "\"d"
     ));
 }
+
+#[test]
+fn brace_substitutions_record_their_form() {
+    // (source, brace, reply): `${| …; }` expands to REPLY, not to output.
+    for (source, brace, reply) in [
+        ("$(a)", false, false),
+        ("${ a; }", true, false),
+        ("${| a; }", true, true),
+    ] {
+        let parts = decompose(source);
+        assert!(
+            matches!(
+                &parts[..],
+                [Node { kind: NodeKind::CommandSubstitution { brace: b, reply: r, .. }, .. }]
+                if *b == brace && *r == reply
+            ),
+            "{source:?}: {parts:?}"
+        );
+    }
+}

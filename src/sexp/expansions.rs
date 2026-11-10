@@ -51,8 +51,16 @@ pub(super) fn fmt_expansion(f: &mut fmt::Formatter<'_>, kind: &NodeKind) -> fmt:
         NodeKind::ParamIndirect { param, op, arg } => {
             write_param(f, "${{!", param, op.as_deref(), arg.as_deref())
         }
-        NodeKind::CommandSubstitution { command, brace } => {
-            let tag = if *brace { "cmdsub-brace" } else { "cmdsub" };
+        NodeKind::CommandSubstitution {
+            command,
+            brace,
+            reply,
+        } => {
+            let tag = match (brace, reply) {
+                (_, true) => "cmdsub-reply",
+                (true, false) => "cmdsub-brace",
+                (false, false) => "cmdsub",
+            };
             write!(f, "({tag} {command})")
         }
         NodeKind::ProcessSubstitution { direction, command } => {

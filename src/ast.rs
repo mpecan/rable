@@ -270,8 +270,15 @@ pub enum NodeKind {
         arg: Option<String>,
     },
 
-    /// Command substitution: `$(cmd)` or `` `cmd` ``
-    CommandSubstitution { command: Box<Node>, brace: bool },
+    /// Command substitution: `$(cmd)` or `` `cmd` ``, or with `brace`
+    /// bash 5.3's `${ cmd; }`, which runs in the current shell. With
+    /// `reply` it is `${| cmd; }`, which expands to the value `cmd` leaves
+    /// in `REPLY` rather than to its output.
+    CommandSubstitution {
+        command: Box<Node>,
+        brace: bool,
+        reply: bool,
+    },
 
     /// Process substitution: `<(cmd)` or `>(cmd)`
     ProcessSubstitution {
