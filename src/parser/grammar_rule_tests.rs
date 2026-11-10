@@ -293,3 +293,12 @@ fn arith_for_split_skips_substitutions_like_bash() {
         "{nested}"
     );
 }
+
+#[test]
+fn array_elements_are_joined_by_one_space() {
+    // bash reprints `name=(…)` with one space between elements; a line
+    // continuation between them is blank space, not an empty element.
+    assert_words("arr=(\"a\" \\\n \"b\")", &["arr=(\"a\" \"b\")"]);
+    assert_words("arr=(a \\\n b)", &["arr=(a b)"]);
+    assert_words("arr=(\\\na\\\nb c)", &["arr=(ab c)"]);
+}

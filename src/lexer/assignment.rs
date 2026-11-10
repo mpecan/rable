@@ -27,9 +27,18 @@ impl Lexer {
     pub(super) fn read_array_elements(&mut self, wb: &mut WordBuilder) -> Result<()> {
         let mut need_space = false;
         loop {
-            // Skip whitespace between elements
-            while matches!(self.peek_char(), Some(' ' | '\t' | '\n' | '\r')) {
-                self.advance_char();
+            // Skip whitespace and line continuations between elements
+            loop {
+                match self.peek_char() {
+                    Some(' ' | '\t' | '\n' | '\r') => {
+                        self.advance_char();
+                    }
+                    Some('\\') if self.input.get(self.pos + 1) == Some(&'\n') => {
+                        self.advance_char();
+                        self.advance_char();
+                    }
+                    _ => break,
+                }
             }
             match self.peek_char() {
                 Some(')') => {
