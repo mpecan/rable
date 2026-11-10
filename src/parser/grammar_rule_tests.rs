@@ -266,3 +266,15 @@ fn redirects_record_what_they_do() {
         );
     }
 }
+
+#[test]
+fn nested_substitution_debug_and_eq_stay_linear() {
+    // A substitution's parsed body is cached on its span and also appears
+    // in the word's parts; Debug and PartialEq must not visit both, or
+    // their cost doubles with every level of nesting.
+    let depth = 40;
+    let source = format!("echo {}x{}", "$(a ".repeat(depth), ")".repeat(depth));
+    let nodes = try_parse(&source).unwrap_or_default();
+    assert!(format!("{nodes:?}").len() < 100_000);
+    assert_eq!(nodes, try_parse(&source).unwrap_or_default());
+}

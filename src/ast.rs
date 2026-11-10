@@ -17,7 +17,7 @@ pub struct Span {
 /// Records where each expansion starts/ends in the raw token text.
 /// External consumers see this type through the variant field but cannot
 /// read or construct it — the fields are crate-private.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone)]
 pub struct WordSpan {
     pub(crate) start: usize,
     pub(crate) end: usize,
@@ -26,7 +26,34 @@ pub struct WordSpan {
     /// The command list a `$(…)`, `<(…)`/`>(…)` or `${ …; }` holds, as the
     /// lexer's forked parse produced it, so printers and word parts never
     /// re-parse the text. `None` for other spans and for backticks.
+    ///
+    /// It is a cache of the span's text, which the word's value and parts
+    /// already carry, so `PartialEq` and `Debug` leave it out: visiting it
+    /// there too would double the work at every nesting level.
     pub(crate) body: Option<std::sync::Arc<Node>>,
+}
+
+impl PartialEq for WordSpan {
+    fn eq(&self, other: &Self) -> bool {
+        self.start == other.start
+            && self.end == other.end
+            && self.kind == other.kind
+            && self.context == other.context
+    }
+}
+
+impl Eq for WordSpan {}
+
+impl std::fmt::Debug for WordSpan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WordSpan")
+            .field("start", &self.start)
+            .field("end", &self.end)
+            .field("kind", &self.kind)
+            .field("context", &self.context)
+            .field("has_body", &self.body.is_some())
+            .finish()
+    }
 }
 
 impl Span {
