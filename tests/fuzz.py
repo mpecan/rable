@@ -15,6 +15,7 @@ Usage:
 import argparse
 import os
 import random
+import re
 import shutil
 import string
 import subprocess
@@ -40,13 +41,15 @@ def run_oracle(source, extglob=False):
         cmd.append("-O")
         cmd.append("extglob")
     try:
+        # Bytes, not text=True: universal newlines would turn a `\r` in a
+        # word's value into `\n`.
         result = subprocess.run(
-            cmd, input=source, capture_output=True, text=True, timeout=5,
-            errors="replace",
+            cmd, input=source.encode(errors="surrogateescape"),
+            capture_output=True, timeout=5,
         )
         if result.returncode != 0:
             return "<error>"
-        return result.stdout.strip()
+        return result.stdout.decode(errors="replace").strip()
     except (subprocess.TimeoutExpired, OSError, UnicodeDecodeError):
         return None
 
@@ -286,9 +289,21 @@ def minimize(source, check_fn):
 # --- Comparison ---
 
 
+# A `"…"` S-expression string (to its end if unclosed), or a whitespace run.
+_SEXP_STRING_OR_SPACE = re.compile(r'"(?:[^"\\]|\\.)*(?:"|$)|\s+', re.S)
+
+
 def normalize(s):
-    """Normalize whitespace for comparison."""
-    return " ".join(s.split()) if s else s
+    """Collapse whitespace between S-expression tokens for comparison.
+
+    Whitespace inside a `"…"` string is part of a word's value and is kept,
+    so a difference there is not hidden.
+    """
+    if not s:
+        return s
+    return _SEXP_STRING_OR_SPACE.sub(
+        lambda m: m.group() if m.group().startswith('"') else " ", s
+    ).strip()
 
 
 def compare(source, verbose=False, valid_only=False):

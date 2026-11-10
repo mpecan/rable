@@ -15,6 +15,9 @@ Every difference has one of three kinds:
   rable_err   bash accepts the input, Rable rejects it
   differ      both parse it, to different ASTs
 
+An input bash-oracle gives no answer for (timeout or crash) is counted as
+no_oracle, never as a match, and makes the run exit non-zero.
+
 Usage:
   python tests/oracle_diff.py corpus
   python tests/oracle_diff.py fuzz -n 300000 --seed 20261107 --out diffs.jsonl
@@ -56,7 +59,7 @@ def compare_one(item):
     name, source, extglob = item
     oracle = fuzz.run_oracle(source, extglob=extglob)
     if oracle is None:
-        return None
+        return {"name": name, "kind": "no_oracle", "input": source}
     rable = fuzz.run_rable(source, extglob=extglob)
     if fuzz.normalize(oracle) == fuzz.normalize(rable):
         return None
@@ -84,6 +87,8 @@ def run_diff(items, out_path):
                     out.write(json.dumps(record) + "\n")
     print(f"{len(items)} inputs; differences: "
           + ", ".join(f"{k} {counts[k]}" for k in ("oracle_err", "rable_err", "differ")))
+    if counts["no_oracle"]:
+        print(f"bash-oracle gave no answer (timeout or crash) for {counts['no_oracle']} inputs")
     return counts
 
 
@@ -95,6 +100,8 @@ def cmd_probe(path):
         if not source:
             continue
         oracle = fuzz.run_oracle(source)
+        if oracle is None:
+            sys.exit(f"bash-oracle gave no answer for {source!r}")
         rable = fuzz.run_rable(source)
         same = fuzz.normalize(oracle) == fuzz.normalize(rable)
         diffs += not same
@@ -131,7 +138,10 @@ def cmd_snapshot(out_path, n, seed):
 def judge_change(change):
     """Classify one changed output against bash-oracle."""
     source, extglob, old, new = change
-    oracle = fuzz.normalize(fuzz.run_oracle(source, extglob=extglob))
+    oracle = fuzz.run_oracle(source, extglob=extglob)
+    if oracle is None:
+        return "no oracle answer"
+    oracle = fuzz.normalize(oracle)
     if oracle == fuzz.normalize(new):
         return "now matches bash"
     if oracle == fuzz.normalize(old):
@@ -156,7 +166,7 @@ def cmd_compare(before_path, after_path):
         print(f"{verdict}: {source!r:.80}\n  before {old[:110]}\n  after  {new[:110]}")
     counts = Counter(verdicts)
     print(f"{len(changes)} changed inputs: {dict(counts)}")
-    return 1 if counts["regressed"] else 0
+    return 1 if counts["regressed"] or counts["no oracle answer"] else 0
 
 
 def main():
@@ -179,16 +189,15 @@ def main():
     args = parser.parse_args()
 
     if args.cmd == "corpus":
-        run_diff(load_corpus(), args.out)
-    elif args.cmd == "fuzz":
-        run_diff(fuzz_inputs(args.n, args.seed), args.out)
-    elif args.cmd == "probe":
+        return 1 if run_diff(load_corpus(), args.out)["no_oracle"] else 0
+    if args.cmd == "fuzz":
+        return 1 if run_diff(fuzz_inputs(args.n, args.seed), args.out)["no_oracle"] else 0
+    if args.cmd == "probe":
         return cmd_probe(args.file)
-    elif args.cmd == "snapshot":
+    if args.cmd == "snapshot":
         cmd_snapshot(args.out, args.n, args.seed)
-    else:
-        return cmd_compare(args.before, args.after)
-    return 0
+        return 0
+    return cmd_compare(args.before, args.after)
 
 
 if __name__ == "__main__":
