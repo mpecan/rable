@@ -24,6 +24,7 @@ mod words;
 
 use std::cell::Cell;
 
+use crate::ast::Node;
 use formatter::Formatter;
 
 thread_local! {
@@ -53,13 +54,60 @@ impl Drop for DepthGuard {
     }
 }
 
+/// The canonical text of a substitution body: printed from the command
+/// list the lexer parsed for it, as bash prints a command substitution
+/// from its parse tree, or (for backticks, which have no tree) reformatted
+/// from its text.
+pub fn substitution_text(body: Option<&Node>, content: &str) -> String {
+    body.map_or_else(
+        || reformat_or_normalize(content),
+        |node| {
+            let mut f = Formatter::new();
+            f.format_node(node);
+            f.finish()
+        },
+    )
+}
+
+/// The canonical text of a command substitution body: reformatted when
+/// it parses, otherwise trimmed (see [`crate::sexp::normalize_cmdsub_content`]).
+pub fn reformat_or_normalize(content: &str) -> String {
+    reformat_bash(content).unwrap_or_else(|| crate::sexp::normalize_cmdsub_content(content))
+}
+
+/// bash's form of `${ …; }` / `${| …; }` (`content` is the text after
+/// `${` / `${|`, before `}`): the reformatted body, a `;` unless the body
+/// ends a line or with ` &` (bash's `semicolon()`), then ` }`. So
+/// `${ echo hi;}` → `${ echo hi; }` and `${| echo hi; }` → `${|echo hi; }`.
+pub fn funsub_text(pipe: bool, sub: &crate::sexp::word::Substitution) -> String {
+    let content = sub.content.as_str();
+    let open = if pipe { "${|" } else { "${ " };
+    let mut body = sub.text();
+    if body.is_empty() {
+        // bash prints an empty body as `${ }`, with or without the `|`.
+        return "${ }".to_string();
+    }
+    // A body ended by a newline keeps it, as bash's newline connector does.
+    if content.trim_end_matches([' ', '\t']).ends_with('\n') && !body.ends_with('\n') {
+        body.push('\n');
+    }
+    let mut text = format!("{open}{body}");
+    if formatter::needs_semicolon(&body) {
+        text.push(';');
+    }
+    text.push_str(" }");
+    text
+}
+
 /// Attempts to reformat bash source into canonical form.
 /// Returns `None` if parsing fails (in which case raw text is used).
 ///
-/// The re-parse runs in `LexerMode::Cmdsub` because `reformat_bash` is
-/// only ever called on content extracted from a `$(…)` / `<(…)` / `>(…)`
-/// span, and that mode enables the same sloppy heredoc-terminator
-/// recognition the original fork used (see #39 and
+/// `$(…)`, `<(…)`/`>(…)` and `${ …; }` bodies are printed from the tree
+/// the lexer already parsed (see [`substitution_text`]); this re-parse is
+/// only the fallback for backtick bodies, which have no tree, and is
+/// bounded by a size cap and a nesting depth guard. It runs in
+/// `LexerMode::Cmdsub` for the same sloppy heredoc-terminator recognition
+/// a substitution's fork uses (see #39 and
 /// `Lexer::try_match_sloppy_delimiter`).
 pub fn reformat_bash(source: &str) -> Option<String> {
     if source.is_empty() || source.len() > 1000 {
@@ -142,18 +190,77 @@ mod tests {
     }
 
     #[test]
-    fn formats_coproc_with_and_without_a_name() {
-        assert_eq!(reformat("coproc { ls; }"), "coproc { ls; }");
-        assert_eq!(reformat("coproc NAME { ls; }"), "coproc NAME { ls; }");
-    }
-
-    #[test]
     fn omits_the_file_descriptor_when_it_is_the_operator_default() {
         // Input redirections default to fd 0, output redirections to fd 1.
         assert_eq!(reformat("cat 0< f; echo hi"), "cat < f; echo hi");
-        assert_eq!(reformat("cat 0<&1; echo hi"), "cat <&1; echo hi");
         assert_eq!(reformat("cat 0<> f; echo hi"), "cat <> f; echo hi");
         assert_eq!(reformat("cat 1> f; echo hi"), "cat > f; echo hi");
+    }
+
+    #[test]
+    fn arithmetic_commands_and_pipe_both_after_compounds() {
+        // These used to leak S-expression text into the word.
+        assert_eq!(reformat("((x  =5)) >f"), "((x  =5)) > f");
+        assert_eq!(reformat("((x)) && y"), "((x)) && y");
+        // `|&` after a compound is a bare `2>&1` stage; bash prints it on
+        // the command.
+        assert_eq!(reformat("(cmd) |& cat"), "( cmd ) 2>&1 | cat");
+        assert_eq!(reformat("{ a; } |& b"), "{ a; } 2>&1 | b");
+        assert_eq!(reformat("((x++)) |& c"), "((x++)) 2>&1 | c");
+    }
+
+    #[test]
+    fn separators_after_heredocs_follow_bash_print_cmd() {
+        // Bodies take a `;`'s place, and bash then drops the next `;`.
+        assert_eq!(reformat("a <<E; b\nx\nE"), "a <<E\nx\nE\n b");
+        assert_eq!(reformat("a <<E && b; c\nx\nE"), "a <<E && \nx\nE\n b c");
+        assert_eq!(
+            reformat("a <<E && b; c; d\nx\nE"),
+            "a <<E && \nx\nE\n b c; d"
+        );
+        // `semicolon()`: no `;` right after the bodies.
+        assert_eq!(reformat("{ a <<E; } && b\nx\nE"), "{ a <<E\nx\nE\n } && b");
+        // A newline separator stays a newline.
+        assert_eq!(reformat("{ a\nb; }"), "{ a\nb; }");
+        assert_eq!(
+            reformat("{ cat <<E\nx\nE\n  b; }"),
+            "{ cat <<E\nx\nE\n\nb; }"
+        );
+    }
+
+    #[test]
+    fn function_bodies_break_lines_like_bash() {
+        let body = |source: &str| reformat(source).replace("function f () \n{ \n", "");
+        assert_eq!(body("f() { a; b; c; }"), "    a;\n    b;\n    c\n}");
+        assert_eq!(body("f() { a & b; }"), "    a & b\n}");
+        assert_eq!(body("f() { a & }"), "    a &\n}");
+        assert_eq!(body("f() { a\nb; }"), "    a\n\n    b\n}");
+    }
+
+    #[test]
+    fn coproc_with_a_compound_body_is_named() {
+        assert_eq!(reformat("coproc { ls; }"), "coproc COPROC { ls; }");
+        assert_eq!(reformat("coproc NAME { ls; }"), "coproc NAME { ls; }");
+        assert_eq!(reformat("coproc (cat)"), "coproc COPROC ( cat )");
+        assert_eq!(reformat("coproc cat <f"), "coproc cat < f");
+    }
+
+    #[test]
+    fn dup_move_and_close_follow_bash_print_redirection() {
+        // A numeric dup or a move always prints its fd; a close is always
+        // `N>&-`; a dup to a word omits the default fd.
+        assert_eq!(reformat("cat 0<&1; echo hi"), "cat 0<&1; echo hi");
+        assert_eq!(reformat("echo error >&2"), "echo error 1>&2");
+        assert_eq!(reformat("read <&0"), "read 0<&0");
+        assert_eq!(reformat("cmd >&02"), "cmd 1>&2");
+        assert_eq!(reformat("exec 3<&0-"), "exec 3<&0-");
+        assert_eq!(reformat("exec 3<&a0-"), "exec 3<&a0-");
+        assert_eq!(reformat("cmd >&-"), "cmd 1>&-");
+        assert_eq!(reformat("cmd <&-"), "cmd 0>&-");
+        assert_eq!(reformat("cmd 3<&-"), "cmd 3>&-");
+        assert_eq!(reformat("cmd >& -"), "cmd 1>&-");
+        assert_eq!(reformat("cmd >&$fd"), "cmd >&$fd");
+        assert_eq!(reformat("cmd 2>&$fd"), "cmd 2>&$fd");
     }
 
     #[test]
@@ -211,10 +318,23 @@ mod tests {
     }
 
     #[test]
-    fn nested_substitutions_stop_reformatting_at_the_depth_limit() {
-        // One level in, `c;d` is normalized to `c; d`. Two levels in the
-        // budget is spent and the text is left exactly as written.
+    fn long_substitution_bodies_are_reformatted_too() {
+        // Bodies print from the lexer's tree, so the re-parse size cap no
+        // longer applies: bash reformats `$(a;b …)` whatever its length.
+        let source = format!("echo $({})", "a;b ".repeat(300));
+        let Ok(nodes) = crate::parse(&source, false) else {
+            unreachable!("{source:?} should parse");
+        };
+        let sexp = nodes[0].to_string();
+        assert!(sexp.contains("$(a; b a; b"), "{sexp:.80}");
+    }
+
+    #[test]
+    fn nested_substitutions_are_reformatted_at_every_level() {
+        // Each body is printed from the tree the lexer parsed for it, so
+        // nesting depth makes no difference, as in bash.
         assert_eq!(reformat("a $(b;c)"), "a $(b; c)");
-        assert_eq!(reformat("a $(b $(c;d))"), "a $(b $(c;d))");
+        assert_eq!(reformat("a $(b $(c;d))"), "a $(b $(c; d))");
+        assert_eq!(reformat("a $(b $(c $(d;e)))"), "a $(b $(c $(d; e)))");
     }
 }

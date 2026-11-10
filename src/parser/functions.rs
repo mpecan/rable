@@ -134,7 +134,7 @@ impl Parser {
         // redirect. The redirect target must not be re-armed as a command
         // start, so this check comes before `allow_command_after_word`.
         if is_redirect_op_kind(first_tok.kind) {
-            return self.parse_coproc_redirect_first(start, first_tok);
+            return self.parse_coproc_redirect_first(start, &first_tok);
         }
         self.lexer.allow_command_after_word();
 
@@ -165,7 +165,7 @@ impl Parser {
     /// Path B: first token after `coproc` is a redirect operator. Build a
     /// synthetic `Command` (`coproc >&fd cmd args`) wrapped in a nameless
     /// `Coproc`.
-    fn parse_coproc_redirect_first(&mut self, start: usize, first_tok: Token) -> Result<Node> {
+    fn parse_coproc_redirect_first(&mut self, start: usize, first_tok: &Token) -> Result<Node> {
         let redirects = vec![self.build_redirect(first_tok, -1, None)?];
         let (words, redirects) = self.collect_coproc_words(Vec::new(), redirects)?;
         Ok(self.build_coproc_synthetic_command(start, None, words, redirects))

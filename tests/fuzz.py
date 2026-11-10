@@ -15,6 +15,7 @@ Usage:
 import argparse
 import os
 import random
+import re
 import shutil
 import string
 import subprocess
@@ -40,13 +41,15 @@ def run_oracle(source, extglob=False):
         cmd.append("-O")
         cmd.append("extglob")
     try:
+        # Bytes, not text=True: universal newlines would turn a `\r` in a
+        # word's value into `\n`.
         result = subprocess.run(
-            cmd, input=source, capture_output=True, text=True, timeout=5,
-            errors="replace",
+            cmd, input=source.encode(errors="surrogateescape"),
+            capture_output=True, timeout=5,
         )
         if result.returncode != 0:
             return "<error>"
-        return result.stdout.strip()
+        return result.stdout.decode(errors="replace").strip()
     except (subprocess.TimeoutExpired, OSError, UnicodeDecodeError):
         return None
 
@@ -128,28 +131,45 @@ COMPOUND_TEMPLATES = [
 ]
 
 
-def load_test_inputs():
-    """Load all inputs from .tests files as seed corpus."""
-    inputs = []
-    test_dir = os.path.join(os.path.dirname(__file__), "parable")
-    for fname in sorted(os.listdir(test_dir)):
-        if not fname.endswith(".tests"):
-            continue
-        path = os.path.join(test_dir, fname)
-        with open(path) as f:
-            lines = f.read().split("\n")
-        i = 0
-        while i < len(lines):
-            if lines[i].startswith("=== "):
-                i += 1
-                input_lines = []
-                while i < len(lines) and lines[i] != "---":
-                    input_lines.append(lines[i])
+def load_test_cases(subdirs=("parable",)):
+    """Yield (name, source, extglob) for every case in the .tests files of
+    the given directories under tests/. A `# @extglob` line enables extglob
+    for the rest of its file, or for one case when it is part of the input."""
+    for name, lines, extglob in _iter_case_lines(subdirs):
+        yield name, "\n".join(lines), extglob
+
+
+def _iter_case_lines(subdirs):
+    """Like load_test_cases, with each input as its list of lines."""
+    tests_dir = os.path.dirname(os.path.abspath(__file__))
+    for sub in subdirs:
+        directory = os.path.join(tests_dir, sub)
+        for fname in sorted(os.listdir(directory)):
+            if not fname.endswith(".tests"):
+                continue
+            with open(os.path.join(directory, fname)) as f:
+                lines = f.read().split("\n")
+            extglob = False
+            i = 0
+            while i < len(lines):
+                if lines[i].startswith("# @extglob"):
+                    extglob = True
+                if lines[i].startswith("=== "):
+                    name = lines[i][4:]
                     i += 1
-                if input_lines:
-                    inputs.append("\n".join(input_lines))
-            i += 1
-    return inputs
+                    source = []
+                    while i < len(lines) and lines[i] != "---":
+                        source.append(lines[i])
+                        i += 1
+                    marked = any(line.startswith("# @extglob") for line in source)
+                    yield f"{sub}/{fname}::{name}", source, extglob or marked
+                i += 1
+
+
+def load_test_inputs():
+    """Load the inputs of tests/parable as seed corpus (cases with at least
+    one input line, which may be empty)."""
+    return ["\n".join(lines) for _, lines, _ in _iter_case_lines(("parable",)) if lines]
 
 
 def mutate(source):
@@ -269,9 +289,21 @@ def minimize(source, check_fn):
 # --- Comparison ---
 
 
+# A `"…"` S-expression string (to its end if unclosed), or a whitespace run.
+_SEXP_STRING_OR_SPACE = re.compile(r'"(?:[^"\\]|\\.)*(?:"|$)|\s+', re.S)
+
+
 def normalize(s):
-    """Normalize whitespace for comparison."""
-    return " ".join(s.split()) if s else s
+    """Collapse whitespace between S-expression tokens for comparison.
+
+    Whitespace inside a `"…"` string is part of a word's value and is kept,
+    so a difference there is not hidden.
+    """
+    if not s:
+        return s
+    return _SEXP_STRING_OR_SPACE.sub(
+        lambda m: m.group() if m.group().startswith('"') else " ", s
+    ).strip()
 
 
 def compare(source, verbose=False, valid_only=False):

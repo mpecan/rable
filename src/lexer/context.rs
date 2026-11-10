@@ -27,6 +27,10 @@ pub(crate) struct LexerContext {
     /// The current simple command has consumed a word or assignment, so a
     /// redirect now ends assignment position: `a=(x) >f b=(y)` is an error.
     pub(crate) command_has_word: bool,
+    /// Lexing the body of `${ …; }` (only on its fork): a word starting
+    /// with `}` where a reserved word may appear is just the closing `}`,
+    /// so `${ a;}${ b;}` closes at the first `}`.
+    pub(crate) funsub: bool,
 }
 
 impl Default for LexerContext {
@@ -38,6 +42,7 @@ impl Default for LexerContext {
             assignment_builtin: false,
             redirect_target: false,
             command_has_word: false,
+            funsub: false,
         }
     }
 }

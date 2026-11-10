@@ -30,11 +30,11 @@ impl Formatter {
         };
         self.write_str("if ");
         self.format_node(condition);
-        self.write_str("; then\n");
+        self.write_body_keyword("then", 4);
         self.with_indent(4, |f| {
             f.indent_here();
             f.format_node(then_body);
-            f.write_str(";\n");
+            f.end_body_line();
         });
         if let Some(eb) = else_body.as_deref() {
             self.indent_here();
@@ -42,11 +42,33 @@ impl Formatter {
             self.with_indent(4, |f| {
                 f.indent_here();
                 f.format_node(eb);
-                f.write_str(";\n");
+                f.end_body_line();
             });
         }
         self.indent_here();
         self.write_str("fi");
+    }
+
+    /// Writes `; then` / `; do` after a condition, as bash's if/while
+    /// printers do: after heredoc bodies the keyword starts its own line,
+    /// indented by `indent_after_heredoc` (bash uses 4 for `then` and the
+    /// current indentation for `do`).
+    fn write_body_keyword(&mut self, keyword: &str, indent_after_heredoc: usize) {
+        self.semicolon();
+        if self.take_was_heredoc() {
+            self.write_indent(indent_after_heredoc);
+        } else {
+            self.write_char(' ');
+        }
+        self.write_str(keyword);
+        self.write_char('\n');
+    }
+
+    /// Ends a compound command's body line: bash's `semicolon()` and a
+    /// newline before the closing keyword.
+    fn end_body_line(&mut self) {
+        self.semicolon();
+        self.write_char('\n');
     }
 
     pub(super) fn format_while_until(&mut self, node: &Node, keyword: &str) {
@@ -68,11 +90,11 @@ impl Formatter {
         self.write_str(keyword);
         self.write_char(' ');
         self.format_node(condition);
-        self.write_str("; do\n");
+        self.write_body_keyword("do", self.indent());
         self.with_indent(4, |f| {
             f.indent_here();
             f.format_node(body);
-            f.write_str(";\n");
+            f.end_body_line();
         });
         self.indent_here();
         self.write_str("done");
@@ -131,7 +153,7 @@ impl Formatter {
         self.with_indent(4, |f| {
             f.indent_here();
             f.format_node(body);
-            f.write_str(";\n");
+            f.end_body_line();
         });
         self.indent_here();
         self.write_str("done");
@@ -160,7 +182,7 @@ impl Formatter {
         self.with_indent(4, |f| {
             f.indent_here();
             f.format_node(body);
-            f.write_str(";\n");
+            f.end_body_line();
         });
         self.indent_here();
         self.write_str("done");
@@ -242,6 +264,7 @@ impl Formatter {
         self.write_char('\n');
         self.indent_here();
         self.write_char('}');
+        self.clear_was_heredoc();
     }
 
     pub(super) fn format_subshell(&mut self, node: &Node) {
@@ -254,6 +277,7 @@ impl Formatter {
         self.write_str("( ");
         self.format_node(body);
         self.write_str(" )");
+        self.clear_was_heredoc();
         self.write_trailing_redirects(redirects);
     }
 
@@ -266,7 +290,25 @@ impl Formatter {
         };
         self.write_str("{ ");
         self.format_node(body);
-        self.write_str("; }");
+        self.semicolon();
+        self.write_str(" }");
+        self.clear_was_heredoc();
+        self.write_trailing_redirects(redirects);
+    }
+
+    /// `(( expr ))`: bash prints the expression text as written.
+    pub(super) fn format_arith_command(&mut self, node: &Node) {
+        let NodeKind::ArithmeticCommand {
+            raw_content,
+            redirects,
+            ..
+        } = &node.kind
+        else {
+            return;
+        };
+        self.write_str("((");
+        self.write_str(raw_content);
+        self.write_str("))");
         self.write_trailing_redirects(redirects);
     }
 
@@ -309,9 +351,11 @@ impl Formatter {
         let NodeKind::Coproc { name, command } = &node.kind else {
             return;
         };
+        // bash names every coproc whose body is not a simple command,
+        // `COPROC` by default: `coproc ( cat )` → `coproc COPROC ( cat )`.
         self.write_str("coproc ");
-        if let Some(n) = name.as_deref() {
-            self.write_str(n);
+        if !matches!(command.kind, NodeKind::Command { .. }) {
+            self.write_str(name.as_deref().unwrap_or("COPROC"));
             self.write_char(' ');
         }
         self.format_node(command);

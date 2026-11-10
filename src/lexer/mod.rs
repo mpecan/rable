@@ -10,6 +10,7 @@ mod backtick;
 mod brace_expansion;
 mod cond_regex;
 mod context;
+mod delimited;
 mod expansions;
 pub(crate) mod heredoc;
 mod operators;
@@ -33,8 +34,9 @@ mod tests;
 mod word_span_tests;
 
 pub(crate) use context::LexerContext;
+pub(crate) use delimited::split_top_level;
 pub(crate) use heredoc::PendingHereDoc;
-pub(crate) use words::{is_fd_number, is_varfd};
+pub(crate) use words::{default_fd_for_op, fd_number, is_fd_number, is_varfd};
 
 /// Immutable lexer configuration set at construction time.
 #[derive(Debug, Clone, Copy)]
@@ -113,6 +115,11 @@ impl Lexer {
     pub(crate) const fn allow_command_after_word(&mut self) {
         self.ctx.command_start = true;
         self.ctx.reserved_words_ok = true;
+    }
+
+    /// Marks this (forked) lexer as reading a `${ …; }` body.
+    pub(crate) const fn enter_funsub(&mut self) {
+        self.ctx.funsub = true;
     }
 
     /// Signal that the next word position is a command start. Also

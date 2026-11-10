@@ -207,7 +207,6 @@ Source string
 | `ast.rs` | 50+ AST node types covering the full bash grammar |
 | `token.rs` | Token types and lexer output |
 | `error.rs` | Error types with line/position information |
-| `context.rs` | Parsing context and state management |
 | `sexp/` | S-expression output with word segment processing |
 | `format/` | Canonical bash reformatter (used for command substitution content) |
 | `python.rs` | PyO3 bindings (feature-gated under `python`) |

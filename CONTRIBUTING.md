@@ -89,7 +89,6 @@ src/
   ast.rs              AST node types (NodeKind enum with 50+ variants)
   token.rs            Token types and lexer output
   error.rs            Error types (ParseError, MatchedPairError)
-  context.rs          Parsing context and state management
   lexer/              Context-sensitive tokenizer
     mod.rs              Main lexer loop
     quotes.rs           Quote and escape handling
@@ -145,6 +144,24 @@ just setup                    # one-time Python environment setup
 just fuzz-mutate 50000        # mutate existing test inputs (default: 10,000)
 just fuzz-generate 10000      # generate random bash fragments (default: 5,000)
 just fuzz-minimize 'input'    # minimize a failing input
+```
+
+To measure how far Rable is from bash itself (requires `just build-oracle`):
+
+```bash
+just oracle-corpus            # corpus inputs that differ from bash-oracle (should be 0)
+just oracle-fuzz              # 300k seeded mutations; differences go to oracle-diffs.jsonl
+just oracle-probe cases.txt   # side-by-side for inputs listed one per line
+```
+
+Before and after a refactor, snapshot Rable's own output and compare the two;
+any input whose output changed is reported with bash-oracle's verdict:
+
+```bash
+just oracle-snapshot before.jsonl
+# ... change the code ...
+just oracle-snapshot after.jsonl
+just oracle-compare before.jsonl after.jsonl
 ```
 
 If you find a divergence, you can generate oracle tests from it:

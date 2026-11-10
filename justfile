@@ -171,6 +171,28 @@ build-oracle:
     fi
     cd ~/source/bash-oracle && ./configure && make
 
+# --- bash-oracle differential runs (requires `just build-oracle`) ---
+
+# Compare every corpus input with bash-oracle
+oracle-corpus: develop
+    .venv/bin/python3 tests/oracle_diff.py corpus
+
+# Compare seeded mutations with bash-oracle (reproducible; OUT gets JSONL)
+oracle-fuzz n="300000" out="oracle-diffs.jsonl": develop
+    .venv/bin/python3 tests/oracle_diff.py fuzz -n {{n}} --out {{out}}
+
+# Compare inputs listed one per line in FILE with bash-oracle
+oracle-probe file: develop
+    .venv/bin/python3 tests/oracle_diff.py probe {{file}}
+
+# Record Rable's own output on corpus + fuzz inputs (before/after a refactor)
+oracle-snapshot out: develop
+    .venv/bin/python3 tests/oracle_diff.py snapshot {{out}}
+
+# List inputs whose output changed between two snapshots, judged by bash-oracle
+oracle-compare before after:
+    .venv/bin/python3 tests/oracle_diff.py compare {{before}} {{after}}
+
 # --- CI Helpers ---
 
 # Run exactly what CI runs

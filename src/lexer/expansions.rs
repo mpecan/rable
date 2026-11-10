@@ -1,41 +1,13 @@
-use std::ops::ControlFlow;
-
-use crate::context::CaseTracker;
+use crate::ast::Node;
 use crate::error::{RableError, Result};
 
 use super::Lexer;
 use super::word_builder::{QuotingContext, WordBuilder, WordSpanKind};
 
-/// Per-loop state for `read_matched_parens_inner`: paren depth for the
-/// matching-close decision, a `CaseTracker` for `case X in pat) ... ;;`
-/// pattern recognition inside the parens, and a running word buffer the
-/// case tracker peeks at to spot keywords.
-struct ParenLoopState {
-    depth: usize,
-    case: CaseTracker,
-    word_buf: String,
-}
-
-impl ParenLoopState {
-    fn new(close_count: usize) -> Self {
-        Self {
-            depth: close_count,
-            case: CaseTracker::default(),
-            word_buf: String::new(),
-        }
-    }
-
-    /// Close the current word: let the case tracker consume what's been
-    /// accumulated, then reset the buffer. Called by every structural
-    /// arm that terminates a word (`)`, `(`, `'`, `"`, `#`, `;`,
-    /// whitespace, `|`). Backslash escapes, `$` expansions, and
-    /// backticks clear the buffer without calling the tracker — they
-    /// are transparent to case-pattern keyword recognition.
-    fn end_word(&mut self) {
-        self.case.check_word(&self.word_buf);
-        self.word_buf.clear();
-    }
-}
+/// A parser entry (`parse_paren_body`, `parse_funsub_body`) that runs the
+/// grammar on a fork of the lexer at a given depth and returns where the
+/// fork stopped and what it parsed.
+type ForkedBodyParser = fn(&Lexer, usize) -> Result<crate::parser::ForkedBody>;
 
 impl Lexer {
     /// Reads a dollar expansion into the value string.
@@ -51,18 +23,28 @@ impl Lexer {
                 if self.peek_char() == Some('(') {
                     self.advance_char();
                     wb.push('(');
-                    self.read_matched_parens(wb, 2)?;
+                    self.read_matched_parens(wb, true)?;
                     wb.record(span_start, WordSpanKind::ArithmeticSub);
                 } else {
-                    self.read_command_sub(wb)?;
-                    wb.record(span_start, WordSpanKind::CommandSub);
+                    let body = self.read_command_sub(wb)?;
+                    wb.record_body(span_start, WordSpanKind::CommandSub, body);
                 }
             }
             Some('{') => {
                 self.advance_char();
                 wb.push('{');
-                self.read_param_expansion_braces(wb)?;
-                wb.record(span_start, WordSpanKind::ParamExpansion);
+                // `${ cmd; }` / `${| cmd; }`: bash 5.3 command substitution.
+                if let Some(marker) = self.peek_char().filter(|&c| is_funsub_marker(c)) {
+                    if marker == '|' {
+                        self.advance_char();
+                        wb.push('|');
+                    }
+                    let body = self.read_funsub_body(wb)?;
+                    wb.record_body(span_start, WordSpanKind::FunSub(marker == '|'), body);
+                } else {
+                    self.read_param_expansion_braces(wb)?;
+                    wb.record(span_start, WordSpanKind::ParamExpansion);
+                }
             }
             Some('\'') => {
                 self.advance_char();
@@ -95,7 +77,7 @@ impl Lexer {
     /// buffer. The fork consumes up to and including the matching `)`;
     /// the consumed range is then copied into `wb.value`. Precondition:
     /// `read_dollar` has already pushed `$(`.
-    fn read_command_sub(&mut self, wb: &mut WordBuilder) -> Result<()> {
+    fn read_command_sub(&mut self, wb: &mut WordBuilder) -> Result<Node> {
         self.read_paren_body_forked(wb)
     }
 
@@ -104,15 +86,31 @@ impl Lexer {
     /// including the closing `)`. Used by both `$(...)` (command
     /// substitution) and `<(...)`/`>(...)` (process substitution).
     /// Precondition: the opening `(` has just been consumed.
-    pub(super) fn read_paren_body_forked(&mut self, wb: &mut WordBuilder) -> Result<()> {
+    pub(super) fn read_paren_body_forked(&mut self, wb: &mut WordBuilder) -> Result<Node> {
+        self.read_body_forked(wb, crate::parser::parse_paren_body)
+    }
+
+    /// Runs `parse_body` (a parser entry returning its fork's final
+    /// `(pos, line)`) from the current position, then copies the consumed
+    /// source into `wb.value` and moves past it.
+    fn read_body_forked(
+        &mut self,
+        wb: &mut WordBuilder,
+        parse_body: ForkedBodyParser,
+    ) -> Result<Node> {
         let body_start = self.pos;
-        let outer_depth = self.parser_depth();
-        let (end_pos, end_line) = crate::parser::parse_paren_body(self, outer_depth)?;
+        let forked = parse_body(self, self.parser_depth())?;
         wb.value
-            .extend(self.input[body_start..end_pos].iter().copied());
-        self.pos = end_pos;
-        self.line = end_line;
-        Ok(())
+            .extend(self.input[body_start..forked.pos].iter().copied());
+        self.pos = forked.pos;
+        self.line = forked.line;
+        Ok(forked.body)
+    }
+
+    /// Reads the body of `${ …; }` / `${| …; }` by forking the real
+    /// grammar, like `$(…)`, up to and including its closing `}`.
+    fn read_funsub_body(&mut self, wb: &mut WordBuilder) -> Result<Node> {
+        self.read_body_forked(wb, crate::parser::parse_funsub_body)
     }
 
     /// Reads a variable name after `$` for simple expansions.
@@ -132,144 +130,72 @@ impl Lexer {
         }
     }
 
-    /// Reads until matching closing parentheses.
-    pub(super) fn read_matched_parens(
-        &mut self,
-        wb: &mut WordBuilder,
-        close_count: usize,
-    ) -> Result<()> {
+    /// Reads up to the matching closing parenthesis (both of `$((`'s when
+    /// `arith`), as bash's `parse_matched_pair` does for `$(( … ))` and
+    /// extglob patterns: only parentheses are counted, and
+    /// `#` is an ordinary character, never a comment. Quotes, escapes,
+    /// `$…` expansions and backticks are read whole, except that inside
+    /// arithmetic `${` opens an expansion only as a `${ …; }` / `${| …; }`
+    /// command substitution, as bash's `P_ARITH` scan does (`$((${x))` is
+    /// a valid word).
+    pub(super) fn read_matched_parens(&mut self, wb: &mut WordBuilder, arith: bool) -> Result<()> {
         wb.enter_context(QuotingContext::CommandSub);
-        let result = self.read_matched_parens_inner(wb, close_count);
+        let result = self.read_matched_parens_inner(wb, arith);
         wb.leave_context();
         result
     }
 
-    fn read_matched_parens_inner(
-        &mut self,
-        wb: &mut WordBuilder,
-        close_count: usize,
-    ) -> Result<()> {
-        // Remaining callers: arithmetic `$((...))` (close_count == 2) and
-        // extglob patterns `@(...)`, `?(...)`, etc. (close_count == 1).
-        // Neither contains heredocs — `$(...)` and `<(...)`/`>(...)` both
-        // fork the real grammar via `parse_paren_body` instead.
-        let mut state = ParenLoopState::new(close_count);
-        loop {
-            match self.peek_char() {
-                Some(')') => {
-                    if self.handle_paren_close(wb, &mut state).is_break() {
-                        return Ok(());
-                    }
-                }
-                Some('(') => self.handle_paren_open(wb, &mut state),
-                Some(c @ ('\'' | '"')) => self.read_paren_quote(wb, &mut state, c)?,
-                Some('\\') => self.handle_paren_escape(wb, &mut state),
-                Some('$') => {
-                    state.word_buf.clear();
-                    self.read_dollar(wb)?;
-                }
-                Some('`') => {
-                    state.word_buf.clear();
-                    self.read_backtick_sub(wb)?;
-                }
-                Some('#') => self.handle_paren_comment(wb, &mut state),
-                Some(';') => self.handle_paren_semi(wb, &mut state),
-                Some(c @ (' ' | '\t' | '\n' | '|')) => {
-                    self.handle_paren_word_boundary(wb, &mut state, c);
-                }
-                Some(c) => {
-                    state.word_buf.push(c);
+    fn read_matched_parens_inner(&mut self, wb: &mut WordBuilder, arith: bool) -> Result<()> {
+        let mut depth = 1 + usize::from(arith);
+        while let Some(c) = self.peek_char() {
+            match c {
+                '\\' => self.read_paren_escape(wb),
+                '\'' | '"' => {
                     self.advance_char();
                     wb.push(c);
+                    if c == '\'' {
+                        self.read_single_quoted(wb)?;
+                    } else {
+                        self.read_double_quoted(wb)?;
+                    }
                 }
-                None => {
-                    return Err(RableError::matched_pair(
-                        "unterminated parenthesis",
-                        self.pos,
-                        self.line,
-                    ));
+                '$' if !(arith && self.at_plain_dollar_brace()) => self.read_dollar(wb)?,
+                '`' => self.read_backtick_sub(wb)?,
+                _ => {
+                    self.advance_char();
+                    wb.push(c);
+                    match c {
+                        '(' => depth += 1,
+                        ')' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                return Ok(());
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
+        Err(RableError::matched_pair(
+            "unterminated parenthesis",
+            self.pos,
+            self.line,
+        ))
     }
 
-    /// Handles `)` inside `read_matched_parens_inner`. Returns
-    /// `ControlFlow::Break(())` when depth hits zero so the caller
-    /// can `return Ok(())` from the outer loop; otherwise
-    /// `ControlFlow::Continue(())`.
-    ///
-    /// The `case.is_pattern_close()` branch is **defensive**: the
-    /// current callers (`$((…))` with `close_count=2` and extglob
-    /// `@(…)`/`?(…)` with `close_count=1`) cannot contain a valid
-    /// `case X in pat) ... ;;` construct, so this branch is not
-    /// exercised in practice. It is preserved for symmetry with
-    /// `handle_paren_open`/`handle_paren_semi` and in case this
-    /// reader is ever reused in a context where case patterns
-    /// can legally appear inside the parens.
-    fn handle_paren_close(
-        &mut self,
-        wb: &mut WordBuilder,
-        state: &mut ParenLoopState,
-    ) -> ControlFlow<()> {
-        state.end_word();
-        self.advance_char();
-        wb.push(')');
-        if state.case.is_pattern_close() {
-            state.case.close_pattern();
-            ControlFlow::Continue(())
-        } else {
-            state.depth -= 1;
-            if state.depth == 0 {
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
-        }
+    /// True at a `${` that is not a `${ …; }` / `${| …; }` command
+    /// substitution (bash's `FUNSUB_CHAR`).
+    fn at_plain_dollar_brace(&self) -> bool {
+        self.input.get(self.pos + 1) == Some(&'{')
+            && !self
+                .input
+                .get(self.pos + 2)
+                .is_some_and(|&c| is_funsub_marker(c))
     }
 
-    /// Handles `(` inside `read_matched_parens_inner`. Increments
-    /// depth unless we're opening a case-pattern's optional leading
-    /// `(` (e.g. `case x in (a) ...`), which is balanced by its own
-    /// closing `)`.
-    ///
-    /// The `is_pattern_open()` branch is defensive — see the note
-    /// on `handle_paren_close`.
-    fn handle_paren_open(&mut self, wb: &mut WordBuilder, state: &mut ParenLoopState) {
-        state.end_word();
-        self.advance_char();
-        wb.push('(');
-        if !state.case.is_pattern_open() {
-            state.depth += 1;
-        }
-    }
-
-    /// Handles `'` or `"` inside `read_matched_parens_inner`.
-    /// Dispatches to the appropriate quoted-string reader.
-    fn read_paren_quote(
-        &mut self,
-        wb: &mut WordBuilder,
-        state: &mut ParenLoopState,
-        quote: char,
-    ) -> Result<()> {
-        state.end_word();
-        self.advance_char();
-        wb.push(quote);
-        if quote == '\'' {
-            self.read_single_quoted(wb)
-        } else {
-            self.read_double_quoted(wb)
-        }
-    }
-
-    /// Handles `\` inside `read_matched_parens_inner`. Backslash-newline
-    /// is a line continuation — both chars consumed, neither pushed.
-    /// Any other `\<c>` sequence preserves both chars verbatim.
-    ///
-    /// Unlike most arms this only clears `word_buf` without calling
-    /// `case.check_word` — backslash escapes are transparent to the
-    /// case-pattern keyword tracker.
-    fn handle_paren_escape(&mut self, wb: &mut WordBuilder, state: &mut ParenLoopState) {
-        state.word_buf.clear();
+    /// Reads `\<c>` verbatim; a backslash-newline is a line continuation.
+    fn read_paren_escape(&mut self, wb: &mut WordBuilder) {
         self.advance_char();
         if self.peek_char() == Some('\n') {
             self.advance_char();
@@ -281,67 +207,6 @@ impl Lexer {
                 wb.push('\\');
             }
         }
-    }
-
-    /// Handles `#` inside `read_matched_parens_inner`. `#` starts a
-    /// comment only when preceded by whitespace (or at the very start
-    /// of the content — treated as newline-preceded). Otherwise `#`
-    /// is a literal character.
-    fn handle_paren_comment(&mut self, wb: &mut WordBuilder, state: &mut ParenLoopState) {
-        state.end_word();
-        let prev = wb.value.chars().last().unwrap_or('\n');
-        if prev == '\n' || prev == ' ' || prev == '\t' {
-            while let Some(c) = self.peek_char() {
-                if c == '\n' {
-                    break;
-                }
-                self.advance_char();
-            }
-        } else {
-            self.advance_char();
-            wb.push('#');
-        }
-    }
-
-    /// Handles `;` inside `read_matched_parens_inner`, including the
-    /// `;;`, `;&`, and `;;&` case-terminator variants. Any of the
-    /// three extended forms re-enters case-pattern mode so the next
-    /// pattern can be recognized.
-    ///
-    /// The `resume_pattern()` calls are defensive — see the note
-    /// on `handle_paren_close`. The literal-semicolon push happens
-    /// unconditionally and IS exercised (e.g. `$((i++; j--))`).
-    fn handle_paren_semi(&mut self, wb: &mut WordBuilder, state: &mut ParenLoopState) {
-        state.end_word();
-        self.advance_char();
-        wb.push(';');
-        if self.peek_char() == Some(';') {
-            self.advance_char();
-            wb.push(';');
-            if self.peek_char() == Some('&') {
-                self.advance_char();
-                wb.push('&');
-            }
-            state.case.resume_pattern();
-        } else if self.peek_char() == Some('&') {
-            self.advance_char();
-            wb.push('&');
-            state.case.resume_pattern();
-        }
-    }
-
-    /// Handles word-boundary characters (space, tab, newline, `|`)
-    /// inside `read_matched_parens_inner`. All four terminate the
-    /// current word-buf, consume the char, and push it verbatim.
-    fn handle_paren_word_boundary(
-        &mut self,
-        wb: &mut WordBuilder,
-        state: &mut ParenLoopState,
-        c: char,
-    ) {
-        state.end_word();
-        self.advance_char();
-        wb.push(c);
     }
 
     /// Reads a parameter expansion `${...}` allowing unbalanced inner `{`.
@@ -436,4 +301,10 @@ impl Lexer {
 /// Returns true if the character can follow `$` to start a variable expansion.
 pub(super) const fn is_dollar_start(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '_' | '@' | '*' | '#' | '?' | '-' | '$' | '!')
+}
+
+/// bash's `FUNSUB_CHAR`: after `${`, these open a `${ …; }` / `${| …; }`
+/// command substitution rather than a parameter expansion.
+const fn is_funsub_marker(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n' | '|')
 }

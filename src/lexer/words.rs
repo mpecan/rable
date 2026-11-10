@@ -20,6 +20,17 @@ impl Lexer {
             match c {
                 // Metacharacters end a word.
                 ' ' | '\t' | '\n' | '|' | '&' | ';' | ')' => break,
+                // bash: the `}` closing `${ …; }` is a token of its own even
+                // when more word characters follow it (`${ a;}${ b;}`).
+                '}' if wb.is_empty()
+                    && self.ctx.funsub
+                    && self.ctx.command_start
+                    && self.ctx.reserved_words_ok =>
+                {
+                    self.advance_char();
+                    wb.push('}');
+                    break;
+                }
                 // Closing delimiter of a backtick fork ends the word.
                 // The byte is consumed later by `exit_backtick_fork`.
                 '`' if self.at_backtick_terminator() => break,
@@ -96,7 +107,7 @@ impl Lexer {
         } else if self.config.extglob && wb.value.ends_with(['@', '?', '+', '!', '*']) {
             self.advance_char();
             wb.push('(');
-            self.read_matched_parens(wb, 1)?;
+            self.read_matched_parens(wb, false)?;
             Ok(ControlFlow::Continue(()))
         } else {
             Ok(ControlFlow::Break(()))
@@ -120,7 +131,8 @@ impl Lexer {
     /// In any other position a bare `[` is just an ordinary character
     /// so the word reader falls through to the `_` arm.
     fn word_enters_bracket_subscript(&self, wb: &WordBuilder) -> bool {
-        (self.ctx.command_start && is_identifier_prefix(&wb.value))
+        // A redirect target is never an assignment: `<exp[ 5` is `exp[`.
+        (self.ctx.command_start && !self.ctx.redirect_target && is_identifier_prefix(&wb.value))
             || (self.ctx.cond_expr && !wb.is_empty() && !wb.ends_with('['))
     }
 
@@ -132,11 +144,11 @@ impl Lexer {
     /// `reserved_words_ok` (issue #37): once a simple command has
     /// consumed an `AssignmentWord`, bash stops recognising reserved
     /// words in that same command even though we're still at command
-    /// position. Additionally, `]]` is only a reserved word inside a
-    /// `[[ ]]` conditional (issue #35); elsewhere it's an ordinary
-    /// word so the parser doesn't mistake it for a terminator.
+    /// position. Like bash, `]]` is a reserved word in that position too,
+    /// so ` ]] foo` is rejected; as an argument (`echo ]]`) it stays an
+    /// ordinary word (issue #35).
     fn classify_word(&self, wb: &WordBuilder) -> TokenType {
-        let kind = if self.ctx.command_start && self.ctx.reserved_words_ok {
+        if self.ctx.command_start && self.ctx.reserved_words_ok {
             TokenType::reserved_word(&wb.value).unwrap_or_else(|| {
                 if is_assignment_word(&wb.value) {
                     TokenType::AssignmentWord
@@ -148,11 +160,6 @@ impl Lexer {
             TokenType::AssignmentWord
         } else {
             TokenType::Word
-        };
-        if kind == TokenType::DoubleRightBracket && !self.ctx.cond_expr {
-            TokenType::Word
-        } else {
-            kind
         }
     }
 
@@ -264,7 +271,7 @@ impl Lexer {
         wb.push(prefix);
         self.advance_char();
         wb.push('(');
-        self.read_matched_parens(wb, 1)?;
+        self.read_matched_parens(wb, false)?;
         wb.record(start, WordSpanKind::Extglob(prefix));
         Ok(())
     }
@@ -326,7 +333,13 @@ impl Lexer {
                 }
             }
         }
-        Ok(())
+        // bash matches the subscript to its `]` across blanks and lines,
+        // so `foo[0` and `foo[0 bar` hit end of input.
+        Err(RableError::matched_pair(
+            "unterminated subscript",
+            self.pos,
+            self.line,
+        ))
     }
 
     /// Reads a process substitution into an existing word value.
@@ -336,8 +349,8 @@ impl Lexer {
         wb.push(dir);
         self.advance_char(); // (
         wb.push('(');
-        self.read_paren_body_forked(wb)?;
-        wb.record(start, WordSpanKind::ProcessSub(dir));
+        let body = self.read_paren_body_forked(wb)?;
+        wb.record_body(start, WordSpanKind::ProcessSub(dir), body);
         Ok(())
     }
 
@@ -353,8 +366,8 @@ impl Lexer {
         self.advance_char();
         wb.push('(');
         // Read until matching ) via fork-and-merge
-        self.read_paren_body_forked(&mut wb)?;
-        wb.record(span_start, WordSpanKind::ProcessSub(dir));
+        let body = self.read_paren_body_forked(&mut wb)?;
+        wb.record_body(span_start, WordSpanKind::ProcessSub(dir), body);
         // Continue reading word chars after the process substitution
         self.continue_word(&mut wb)?;
         self.advance_word_context(TokenType::Word, &wb.value, false);
@@ -416,7 +429,25 @@ fn is_identifier_prefix(value: &str) -> bool {
 /// digits and within `i32` range, as bash accepts any `int` fd prefix
 /// (`100>file`, `007<in`); larger numbers stay ordinary words.
 pub(crate) fn is_fd_number(s: &str) -> bool {
-    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) && s.parse::<i32>().is_ok()
+    fd_number(s).is_some()
+}
+
+/// The fd a digit-only word names, if it fits bash's `int`: `02` is 2.
+pub(crate) fn fd_number(s: &str) -> Option<i32> {
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    s.parse().ok()
+}
+
+/// The fd a redirect operator acts on when none is written: 1 for output
+/// (`>`, `>&`, …), 0 for input; -1 for operators without one.
+pub(crate) const fn default_fd_for_op(op: &str) -> i32 {
+    match op.as_bytes() {
+        b">" | b">>" | b">|" | b">&" => 1,
+        b"<" | b"<&" | b"<>" => 0,
+        _ => -1,
+    }
 }
 
 /// Returns true if the string is a variable fd reference like `{varname}`.

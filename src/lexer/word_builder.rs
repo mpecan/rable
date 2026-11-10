@@ -12,6 +12,7 @@
 //! `WordBuilder`. This keeps the AST opaque to external consumers while
 //! letting the lexer populate spans internally.
 
+use crate::ast::Node;
 pub(crate) use crate::ast::WordSpan;
 
 /// The quoting context at the point where a span was recorded.
@@ -77,11 +78,27 @@ impl WordBuilder {
     /// Records a completed expansion span from `start` to the current
     /// end of the value string, capturing the current quoting context.
     pub(crate) fn record(&mut self, start: usize, kind: WordSpanKind) {
+        self.record_span(start, kind, None);
+    }
+
+    /// Records a substitution span together with the command list its
+    /// forked parse produced (see [`WordSpan::body`]).
+    pub(crate) fn record_body(&mut self, start: usize, kind: WordSpanKind, body: Node) {
+        self.record_span(start, kind, Some(std::sync::Arc::new(body)));
+    }
+
+    fn record_span(
+        &mut self,
+        start: usize,
+        kind: WordSpanKind,
+        body: Option<std::sync::Arc<Node>>,
+    ) {
         self.spans.push(WordSpan {
             start,
             end: self.value.len(),
             kind,
             context: self.current_context(),
+            body,
         });
     }
 
@@ -117,6 +134,8 @@ pub(crate) enum WordSpanKind {
     LocaleString,
     /// Process substitution: `<(...)` or `>(...)`.
     ProcessSub(char),
+    /// Command substitution `${ …; }`, or `${| …; }` when `true`.
+    FunSub(bool),
 
     // -- Structural (formatter treats as literal text) --
     /// Single-quoted string: `'...'`.

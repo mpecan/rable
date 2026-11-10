@@ -6,10 +6,8 @@
 //! laid out canonically.
 
 use crate::lexer::word_builder::WordSpan;
+use crate::sexp::process_ansi_c_content;
 use crate::sexp::word::{WordSegment, segments_from_spans};
-use crate::sexp::{normalize_cmdsub_content, process_ansi_c_content};
-
-use super::reformat_bash;
 
 /// Process a word value for canonical bash output using span-based
 /// segment extraction. Returns a fresh `String` rather than writing to
@@ -34,25 +32,18 @@ pub(super) fn process_word_value(value: &str, spans: &[WordSpan]) -> String {
                 // $"..." → "..." (content includes the "..." delimiters)
                 result.push_str(content);
             }
-            WordSegment::CommandSubstitution(content) => {
+            WordSegment::CommandSubstitution(sub) => {
                 result.push_str("$(");
-                if let Some(reformatted) = reformat_bash(content) {
-                    result.push_str(&reformatted);
-                } else {
-                    let normalized = normalize_cmdsub_content(content);
-                    result.push_str(&normalized);
-                }
+                result.push_str(&sub.text());
                 result.push(')');
             }
-            WordSegment::ProcessSubstitution(direction, content) => {
+            WordSegment::FunSub { pipe, sub } => {
+                result.push_str(&super::funsub_text(*pipe, sub));
+            }
+            WordSegment::ProcessSubstitution(direction, sub) => {
                 result.push(*direction);
                 result.push('(');
-                if let Some(reformatted) = reformat_bash(content) {
-                    result.push_str(&reformatted);
-                } else {
-                    let normalized = normalize_cmdsub_content(content);
-                    result.push_str(&normalized);
-                }
+                result.push_str(&sub.procsub_text());
                 result.push(')');
             }
             WordSegment::ParamExpansion(text)

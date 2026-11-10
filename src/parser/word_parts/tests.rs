@@ -415,19 +415,19 @@ fn last_word_parts(sub: &Node) -> &[Node] {
 }
 
 #[test]
-fn nested_substitution_decomposes_to_the_depth_limit() {
+fn nested_substitution_decomposes_at_every_level() {
+    // Each level reuses the tree the lexer parsed for it, so nesting depth
+    // does not stop the decomposition.
     let outer = decompose("$(a $(b $(c)))");
     let level2 = last_word_parts(&outer[0]);
     assert!(matches!(
         &level2[0].kind,
         NodeKind::CommandSubstitution { .. }
     ));
-    // The budget is two levels; beyond that the text is kept verbatim
-    // rather than decomposed further.
     let level3 = last_word_parts(&level2[0]);
     assert!(matches!(
         &level3[0].kind,
-        NodeKind::WordLiteral { value } if value == "$(c)"
+        NodeKind::CommandSubstitution { .. }
     ));
 }
 
@@ -479,4 +479,24 @@ fn expansions_inside_double_quotes_still_decompose() {
         &parts[2].kind,
         NodeKind::WordLiteral { value } if value == "\"d"
     ));
+}
+
+#[test]
+fn brace_substitutions_record_their_form() {
+    // (source, brace, reply): `${| …; }` expands to REPLY, not to output.
+    for (source, brace, reply) in [
+        ("$(a)", false, false),
+        ("${ a; }", true, false),
+        ("${| a; }", true, true),
+    ] {
+        let parts = decompose(source);
+        assert!(
+            matches!(
+                &parts[..],
+                [Node { kind: NodeKind::CommandSubstitution { brace: b, reply: r, .. }, .. }]
+                if *b == brace && *r == reply
+            ),
+            "{source:?}: {parts:?}"
+        );
+    }
 }

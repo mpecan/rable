@@ -1,6 +1,6 @@
 //! Helper functions for the parser.
 
-use crate::ast::{Node, NodeKind};
+use crate::ast::{Node, NodeKind, RedirectKind};
 use crate::token::{Token, TokenType};
 
 /// Returns true for the 12 token kinds that start a redirect operator.
@@ -101,6 +101,7 @@ pub(super) fn make_stderr_redirect() -> Node {
         })),
         fd: 2,
         varfd: None,
+        kind: RedirectKind::Dup,
     })
 }
 

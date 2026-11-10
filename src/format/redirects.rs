@@ -1,10 +1,11 @@
 //! Redirect + pipeline formatting. Heredoc bodies are queued on the
 //! [`Formatter`] and written after the next connector's operator.
 
-use crate::ast::{Node, NodeKind};
+use crate::ast::{Node, NodeKind, RedirectKind};
 
 use super::formatter::Formatter;
 use super::words::process_word_value;
+use crate::lexer::{default_fd_for_op, fd_number};
 
 impl Formatter {
     /// Emits a redirect after a compound command (`done <<E`), queueing a
@@ -44,37 +45,56 @@ impl Formatter {
             target,
             fd,
             varfd,
+            kind,
         } = &node.kind
         else {
             return;
         };
-        // Close-fd redirects: >&- with target fd → output as "fd>&-"
-        if op == ">&-" {
-            if let Some(name) = varfd {
-                self.write_char('{');
-                self.write_str(name);
-                self.write_char('}');
-            } else if let NodeKind::Word { value, .. } = &target.kind {
-                self.write_str(value);
-            }
-            self.write_str(">&-");
+        let NodeKind::Word { value, spans, .. } = &target.kind else {
             return;
+        };
+        let varfd = varfd.as_deref();
+        // bash's print_redirection: a close, a move and a numeric dup always
+        // show their fd (`>&2` → `1>&2`, `<&-` → `0>&-`); a dup to a word
+        // and a file redirect only when it is not the operator's default.
+        match kind {
+            RedirectKind::Close => {
+                self.write_redirect_fd(varfd, *fd, true);
+                self.write_str(">&-");
+            }
+            RedirectKind::Move => {
+                self.write_redirect_fd(varfd, *fd, true);
+                self.write_str(op);
+                self.write_str(&fd_number(value).map_or_else(|| value.clone(), |n| n.to_string()));
+                self.write_char('-');
+            }
+            RedirectKind::Dup => {
+                let number = fd_number(value);
+                let show_fd = number.is_some() || *fd != default_fd_for_op(op);
+                self.write_redirect_fd(varfd, *fd, show_fd);
+                self.write_str(op);
+                match number {
+                    Some(n) => self.write_str(&n.to_string()),
+                    None => self.write_str(&process_word_value(value, spans)),
+                }
+            }
+            RedirectKind::File => {
+                self.write_redirect_fd(varfd, *fd, *fd != default_fd_for_op(op));
+                self.write_str(op);
+                self.write_char(' ');
+                self.write_str(&process_word_value(value, spans));
+            }
         }
+    }
+
+    /// Writes a redirect's `{name}` or, when `show_fd`, its fd number.
+    fn write_redirect_fd(&mut self, varfd: Option<&str>, fd: i32, show_fd: bool) {
         if let Some(name) = varfd {
             self.write_char('{');
             self.write_str(name);
             self.write_char('}');
-        } else if *fd >= 0 && *fd != default_fd_for_op(op) {
+        } else if show_fd && fd >= 0 {
             self.write_str(&fd.to_string());
-        }
-        self.write_str(op);
-        // Dup redirects (>&, <&) don't need a space before target
-        let is_dup = op == ">&" || op == "<&";
-        if !is_dup {
-            self.write_char(' ');
-        }
-        if let NodeKind::Word { value, spans, .. } = &target.kind {
-            self.write_str(&process_word_value(value, spans));
         }
     }
 
@@ -112,6 +132,13 @@ impl Formatter {
 
     pub(super) fn format_pipeline(&mut self, commands: &[Node]) {
         for (i, cmd) in commands.iter().enumerate() {
+            // `|&` after a compound command is a bare `2>&1` stage, as in
+            // bash's own dump; bash prints it on the command: `( a ) 2>&1 | b`.
+            if matches!(cmd.kind, NodeKind::Redirect { .. }) {
+                self.write_char(' ');
+                self.format_redirect(cmd);
+                continue;
+            }
             if i > 0 {
                 // ` |`, then the previous stage's heredoc bodies and their
                 // space, then one more: `a <<E |\nx\nE\n  b`, or `a | b`.
@@ -128,17 +155,12 @@ impl Formatter {
     /// compound-construct formatters that need to appendix a redirect
     /// list to their terminator keyword.
     pub(super) fn write_trailing_redirects(&mut self, redirects: &[Node]) {
+        if !redirects.is_empty() {
+            self.clear_was_heredoc();
+        }
         for r in redirects {
             self.write_char(' ');
             self.format_redirect(r);
         }
-    }
-}
-
-const fn default_fd_for_op(op: &str) -> i32 {
-    match op.as_bytes() {
-        b">" | b">>" | b">|" | b">&" => 1,
-        b"<" | b"<&" | b"<>" => 0,
-        _ => -1,
     }
 }

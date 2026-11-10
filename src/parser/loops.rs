@@ -2,7 +2,8 @@
 //! shared `do … done` / `{ … }` body reader.
 
 use crate::ast::{Node, NodeKind};
-use crate::error::Result;
+use crate::error::{RableError, Result};
+use crate::lexer::split_top_level;
 use crate::token::TokenType;
 
 use super::Parser;
@@ -95,18 +96,22 @@ impl Parser {
         self.expect(TokenType::LeftParen)?;
 
         let raw = self.lexer.read_until_double_paren()?;
-        let parts: Vec<&str> = raw.splitn(3, ';').collect();
-        let default_empty = |s: &str| -> String {
-            let trimmed = s.trim_start().to_string();
-            if trimmed.is_empty() {
-                "1".to_string()
+        // bash's make_arith_for_command: exactly three `;`-separated
+        // expressions, each without leading blanks, an empty one being `1`.
+        let parts = split_top_level(&raw, ';')?;
+        let [init, cond, incr] = &parts[..] else {
+            let message = if parts.len() < 3 {
+                "syntax error: arithmetic expression required"
             } else {
-                trimmed
-            }
+                "syntax error: `;' unexpected"
+            };
+            return Err(RableError::parse(message, start, self.lexer.line()));
         };
-        let init = default_empty(parts.first().unwrap_or(&""));
-        let cond = default_empty(parts.get(1).unwrap_or(&""));
-        let incr = default_empty(parts.get(2).unwrap_or(&""));
+        let expr = |part: &str| match part.trim_start() {
+            "" => "1".to_string(),
+            text => text.to_string(),
+        };
+        let (init, cond, incr) = (expr(init), expr(cond), expr(incr));
 
         self.skip_newlines()?;
         if self.peek_is(TokenType::Semi)? || self.peek_is(TokenType::Newline)? {

@@ -24,7 +24,6 @@
 | `src/ast.rs` | `Node` struct, `NodeKind` enum with 50+ variants, `Span` |
 | `src/token.rs` | `TokenType` enum (62 variants), `Token` struct |
 | `src/error.rs` | `RableError` (Parse / MatchedPair) via thiserror |
-| `src/context.rs` | Parsing context and state management |
 | `src/lexer/` | Hand-written context-sensitive tokenizer |
 | `src/lexer/quotes.rs` | Quote and escape handling |
 | `src/lexer/heredoc.rs` | Here-document processing |
@@ -95,6 +94,8 @@ Check an expected S-expression against bash-oracle (build it with `just build-or
 printf '%s' 'echo $(a;b)' | ~/source/bash-oracle/bash-oracle --dump-ast
 # (command (word "echo") (word "$(a; b)"))
 ```
-Add `-O extglob` after `--dump-ast` for extglob inputs. When a `tests/parable/` case disagrees
+Add `-O extglob` after `--dump-ast` for extglob inputs. To measure the gap across the corpus
+and 300k seeded mutations, use `just oracle-corpus` / `just oracle-fuzz`; around a refactor,
+`just oracle-snapshot` before and after, then `just oracle-compare` (see CONTRIBUTING.md). When a `tests/parable/` case disagrees
 with bash-oracle, change its expectation to bash's output and put a
 `# Diverges from upstream Parable` comment above it saying why.

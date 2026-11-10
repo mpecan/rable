@@ -41,6 +41,7 @@ pub(super) fn detect_brace_expansions(wb: &mut WordBuilder) {
                 end: close + 1,
                 kind: WordSpanKind::BraceExpansion,
                 context: QuotingContext::None,
+                body: None,
             });
             i = close + 1;
         } else {

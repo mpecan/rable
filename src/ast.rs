@@ -17,12 +17,43 @@ pub struct Span {
 /// Records where each expansion starts/ends in the raw token text.
 /// External consumers see this type through the variant field but cannot
 /// read or construct it — the fields are crate-private.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct WordSpan {
     pub(crate) start: usize,
     pub(crate) end: usize,
     pub(crate) kind: WordSpanKind,
     pub(crate) context: QuotingContext,
+    /// The command list a `$(…)`, `<(…)`/`>(…)` or `${ …; }` holds, as the
+    /// lexer's forked parse produced it, so printers and word parts never
+    /// re-parse the text. `None` for other spans and for backticks.
+    ///
+    /// It is a cache of the span's text, which the word's value and parts
+    /// already carry, so `PartialEq` and `Debug` leave it out: visiting it
+    /// there too would double the work at every nesting level.
+    pub(crate) body: Option<std::sync::Arc<Node>>,
+}
+
+impl PartialEq for WordSpan {
+    fn eq(&self, other: &Self) -> bool {
+        self.start == other.start
+            && self.end == other.end
+            && self.kind == other.kind
+            && self.context == other.context
+    }
+}
+
+impl Eq for WordSpan {}
+
+impl std::fmt::Debug for WordSpan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WordSpan")
+            .field("start", &self.start)
+            .field("end", &self.end)
+            .field("kind", &self.kind)
+            .field("context", &self.context)
+            .field("has_body", &self.body.is_some())
+            .finish()
+    }
 }
 
 impl Span {
@@ -196,6 +227,10 @@ pub enum NodeKind {
     // -- Redirections --
     /// I/O redirection: `[fd]op target`
     ///
+    /// `op` is the operator as written (`>`, `>>`, `>&`, `<&`, …); `kind`
+    /// says what it does. For a dup, move or close, `fd` is always the fd
+    /// acted on (`>&2` has `fd` 1); otherwise it is -1 unless written. A
+    /// move's `target` has no trailing `-`, and a close's target is `-`.
     /// `varfd` holds the variable name when the source used the
     /// `{name}op` form (e.g. `{fd}>file`). It is `None` for plain
     /// numeric or default-fd redirects.
@@ -204,6 +239,7 @@ pub enum NodeKind {
         target: Box<Node>,
         fd: i32,
         varfd: Option<String>,
+        kind: RedirectKind,
     },
 
     /// Here-document: `<<[-]DELIM\ncontent\nDELIM`
@@ -234,8 +270,15 @@ pub enum NodeKind {
         arg: Option<String>,
     },
 
-    /// Command substitution: `$(cmd)` or `` `cmd` ``
-    CommandSubstitution { command: Box<Node>, brace: bool },
+    /// Command substitution: `$(cmd)` or `` `cmd` ``, or with `brace`
+    /// bash 5.3's `${ cmd; }`, which runs in the current shell. With
+    /// `reply` it is `${| cmd; }`, which expands to the value `cmd` leaves
+    /// in `REPLY` rather than to its output.
+    CommandSubstitution {
+        command: Box<Node>,
+        brace: bool,
+        reply: bool,
+    },
 
     /// Process substitution: `<(cmd)` or `>(cmd)`
     ProcessSubstitution {
@@ -384,14 +427,33 @@ pub enum NodeKind {
 }
 
 /// Operator between commands in a list.
+/// What a redirect does, as bash's redirect instructions distinguish
+/// them (`r_duplicating_output`, `r_move_input`, `r_close_this`, …).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RedirectKind {
+    /// To or from a file, or a here-string: `>`, `<`, `>>`, `<>`, `>|`,
+    /// `&>`, `&>>`, `<<<`.
+    File,
+    /// `N>&M` / `N<&M`: make fd N a copy of M (a number or a word).
+    Dup,
+    /// `N>&M-` / `N<&M-`: move M to N.
+    Move,
+    /// `N>&-` / `N<&-`: close fd N.
+    Close,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ListOperator {
     /// `&&`
     And,
     /// `||`
     Or,
-    /// `;` or `\n`
+    /// `;`
     Semi,
+    /// A newline separating two commands. Dumped like `;` (`(semi …)`),
+    /// but bash keeps it as a newline when reprinting command
+    /// substitutions: `$({ a\nb; })`.
+    Newline,
     /// `&`
     Background,
 }

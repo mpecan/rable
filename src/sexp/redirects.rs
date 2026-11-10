@@ -4,38 +4,42 @@
 
 use std::fmt;
 
-use crate::ast::{Node, NodeKind};
+use crate::ast::{Node, NodeKind, RedirectKind};
+use crate::lexer::fd_number;
 
 use super::ansi_c::process_ansi_c_content;
 use super::word::{self, WordSegment};
-use super::{normalize_cmdsub_content, write_escaped_word};
+use super::write_escaped_word;
 
+/// bash-oracle's dump of a redirect: a close is always `(redirect ">&-" 0)`;
+/// a dup or move names a numeric target as the number bash parsed
+/// (`>&02` → `2`, a move without its `-`); other targets are quoted.
 pub(super) fn write_redirect(
     f: &mut fmt::Formatter<'_>,
     op: &str,
     target: &Node,
-    _fd: i32,
+    kind: RedirectKind,
 ) -> fmt::Result {
+    if kind == RedirectKind::Close {
+        return write!(f, "(redirect \">&-\" 0)");
+    }
     write!(f, "(redirect \"{op}\" ")?;
-    if let NodeKind::Word { value, spans, .. } = &target.kind {
-        // For fd dup operations (>&, <&), bare digit-only targets are unquoted
-        let is_fd_op =
-            op.starts_with(">&") || op.starts_with("<&") || op.ends_with("&-") || op.ends_with('&');
-        if is_fd_op && !value.is_empty() && value.chars().all(|c| c.is_ascii_digit()) {
-            write!(f, "{value})")
-        } else if !spans.is_empty() {
-            // Use span-based formatting — redirect targets use literal
-            // output (no S-expression escaping of quotes)
-            write!(f, "\"")?;
-            let segments = word::segments_from_spans(value, spans);
-            write_redirect_segments(f, &segments)?;
-            write!(f, "\")")
-        } else {
-            // Synthetic nodes (fd strings) — output as-is
-            write!(f, "\"{value}\")")
-        }
+    let NodeKind::Word { value, spans, .. } = &target.kind else {
+        return write!(f, "{target})");
+    };
+    let is_fd_op = matches!(kind, RedirectKind::Dup | RedirectKind::Move);
+    if let Some(n) = is_fd_op.then(|| fd_number(value)).flatten() {
+        write!(f, "{n})")
+    } else if !spans.is_empty() {
+        // Use span-based formatting — redirect targets use literal
+        // output (no S-expression escaping of quotes)
+        write!(f, "\"")?;
+        let segments = word::segments_from_spans(value, spans);
+        write_redirect_segments(f, &segments)?;
+        write!(f, "\")")
     } else {
-        write!(f, "{target})")
+        // Synthetic nodes (fd strings) — output as-is
+        write!(f, "\"{value}\")")
     }
 }
 
@@ -69,25 +73,12 @@ pub(super) fn write_redirect_segments(
                 // $"..." → "..." (content already includes "...")
                 write!(f, "{content}")?;
             }
-            WordSegment::CommandSubstitution(content) => {
-                write!(f, "$(")?;
-                if let Some(reformatted) = crate::format::reformat_bash(content) {
-                    write!(f, "{reformatted}")?;
-                } else {
-                    let normalized = normalize_cmdsub_content(content);
-                    write!(f, "{normalized}")?;
-                }
-                write!(f, ")")?;
+            WordSegment::CommandSubstitution(sub) => write!(f, "$({})", sub.text())?,
+            WordSegment::FunSub { pipe, sub } => {
+                write!(f, "{}", crate::format::funsub_text(*pipe, sub))?;
             }
-            WordSegment::ProcessSubstitution(dir, content) => {
-                write!(f, "{dir}(")?;
-                if let Some(reformatted) = crate::format::reformat_bash(content) {
-                    write!(f, "{reformatted}")?;
-                } else {
-                    let normalized = normalize_cmdsub_content(content);
-                    write!(f, "{normalized}")?;
-                }
-                write!(f, ")")?;
+            WordSegment::ProcessSubstitution(dir, sub) => {
+                write!(f, "{dir}({})", sub.procsub_text())?;
             }
             WordSegment::ParamExpansion(text)
             | WordSegment::SimpleVar(text)
@@ -117,7 +108,9 @@ pub(super) fn write_arith_command(f: &mut fmt::Formatter<'_>, raw_content: &str)
 /// `ArithmeticCommand`.
 pub(super) fn fmt_redirect_like(f: &mut fmt::Formatter<'_>, kind: &NodeKind) -> fmt::Result {
     match kind {
-        NodeKind::Redirect { op, target, fd, .. } => write_redirect(f, op, target, *fd),
+        NodeKind::Redirect {
+            op, target, kind, ..
+        } => write_redirect(f, op, target, *kind),
         NodeKind::HereDoc {
             content,
             strip_tabs,

@@ -47,6 +47,7 @@ impl Formatter {
             NodeKind::Time { .. } => self.format_time(node),
             NodeKind::Coproc { .. } => self.format_coproc(node),
             NodeKind::ConditionalExpr { .. } => self.format_conditional_expr(node),
+            NodeKind::ArithmeticCommand { .. } => self.format_arith_command(node),
             _ => self.write_str(&node.to_string()),
         }
     }
@@ -61,6 +62,9 @@ impl Formatter {
             return;
         };
         self.format_command_words(assignments, words);
+        if !redirects.is_empty() {
+            self.clear_was_heredoc();
+        }
         // Phase 1: all redirect heads inline on the command line.
         // For heredocs this is just the `<<DELIM` part — the bodies are
         // deferred so bash's canonical form can put every op on the same
